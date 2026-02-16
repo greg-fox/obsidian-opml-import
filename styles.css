@@ -1,0 +1,91 @@
+/*
+
+This CSS file will be included with your plugin, and
+available in the app when your plugin is enabled.
+
+If your plugin does not need CSS, delete this file.
+
+*/
+
+.opml-import-setting {
+	margin-bottom: 1.5em;
+}
+
+.opml-import-label {
+	display: block;
+	margin-bottom: 0.5em;
+	font-weight: 600;
+}
+
+.opml-import-input {
+	width: 100%;
+	padding: 0.5em;
+	margin-bottom: 0.5em;
+}
+
+.file-input-container,
+.folder-input-container {
+	display: flex;
+	gap: 0.5em;
+	align-items: center;
+}
+
+.file-input-container input,
+.folder-input-container input {
+	flex: 1;
+}
+
+.opml-import-error {
+	color: var(--text-error);
+	background-color: var(--background-modifier-error);
+	padding: 0.75em;
+	border-radius: 4px;
+	margin-bottom: 1em;
+}
+
+.opml-import-buttons {
+	display: flex;
+	gap: 0.5em;
+	justify-content: flex-end;
+	margin-top: 1.5em;
+}
+
+.templates-container {
+	margin-bottom: 1.5em;
+}
+
+.template-item {
+	border: 1px solid var(--background-modifier-border);
+	border-radius: 4px;
+	padding: 1em;
+	margin-bottom: 1em;
+	background-color: var(--background-secondary);
+}
+
+.no-templates-message {
+	color: var(--text-muted);
+	font-style: italic;
+	padding: 1em;
+	text-align: center;
+}
+
+.placeholder-helpers {
+	margin: 0.5em 0;
+	display: flex;
+	gap: 0.5em;
+	flex-wrap: wrap;
+	align-items: center;
+}
+
+.placeholder-button {
+	padding: 0.25em 0.5em;
+	font-size: 0.9em;
+	background-color: var(--interactive-normal);
+	border: 1px solid var(--background-modifier-border);
+	border-radius: 3px;
+	cursor: pointer;
+}
+
+.placeholder-button:hover {
+	background-color: var(--interactive-hover);
+}
