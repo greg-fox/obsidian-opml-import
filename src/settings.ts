@@ -66,7 +66,19 @@ export class OpmlImportSettingTab extends PluginSettingTab {
 
 		this.plugin.settings.templates.forEach((template, index) => {
 			const templateDiv = container.createDiv('template-item');
-			
+			// Track which textarea in this template to insert into (last focused)
+			let targetTextarea: HTMLTextAreaElement | null = null;
+
+			const insertAtCursor = (textarea: HTMLTextAreaElement, value: string) => {
+				const start = textarea.selectionStart;
+				const end = textarea.selectionEnd;
+				const current = textarea.value;
+				textarea.value = current.substring(0, start) + value + current.substring(end);
+				textarea.selectionStart = textarea.selectionEnd = start + value.length;
+				textarea.dispatchEvent(new Event('input', { bubbles: true }));
+				textarea.focus(); // keep focus so user can keep editing and use quick-insert again
+			};
+
 			// Template name
 			new Setting(templateDiv)
 				.setName('Template Name')
@@ -79,7 +91,7 @@ export class OpmlImportSettingTab extends PluginSettingTab {
 					}));
 
 			// Frontmatter editor
-			const frontmatterSetting = new Setting(templateDiv)
+			new Setting(templateDiv)
 				.setName('Frontmatter (YAML)')
 				.setDesc('YAML frontmatter for the note. Use {{placeholders}} for OPML values.')
 				.addTextArea(text => {
@@ -92,11 +104,12 @@ export class OpmlImportSettingTab extends PluginSettingTab {
 						});
 					text.inputEl.rows = 6;
 					text.inputEl.style.width = '100%';
+					text.inputEl.addEventListener('focus', () => { targetTextarea = text.inputEl; });
 					return text;
 				});
 
 			// Body editor
-			const bodySetting = new Setting(templateDiv)
+			new Setting(templateDiv)
 				.setName('Body Content')
 				.setDesc('Note body content. Use {{placeholders}} for OPML values.')
 				.addTextArea(text => {
@@ -109,6 +122,7 @@ export class OpmlImportSettingTab extends PluginSettingTab {
 						});
 					text.inputEl.rows = 8;
 					text.inputEl.style.width = '100%';
+					text.inputEl.addEventListener('focus', () => { targetTextarea = text.inputEl; });
 					return text;
 				});
 
@@ -130,15 +144,15 @@ export class OpmlImportSettingTab extends PluginSettingTab {
 					text: ph.label,
 					cls: 'placeholder-button'
 				});
-				btn.onclick = () => {
-					const activeElement = document.activeElement as HTMLTextAreaElement;
-					if (activeElement && activeElement.tagName === 'TEXTAREA') {
-						const start = activeElement.selectionStart;
-						const end = activeElement.selectionEnd;
-						const text = activeElement.value;
-						activeElement.value = text.substring(0, start) + ph.value + text.substring(end);
-						activeElement.selectionStart = activeElement.selectionEnd = start + ph.value.length;
-						activeElement.dispatchEvent(new Event('input'));
+				btn.type = 'button'; // prevent form submit
+				btn.onclick = (e) => {
+					e.preventDefault();
+					// Prefer the textarea we last focused in this template; fallback to activeElement
+					const textarea = targetTextarea ?? (document.activeElement instanceof HTMLTextAreaElement ? document.activeElement : null);
+					if (textarea && templateDiv.contains(textarea)) {
+						insertAtCursor(textarea, ph.value);
+					} else if (targetTextarea) {
+						insertAtCursor(targetTextarea, ph.value);
 					}
 				};
 			});
