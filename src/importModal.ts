@@ -345,8 +345,9 @@ export class OpmlImportModal extends Modal {
 		folder: TFolder
 	): Promise<void> {
 		// Render template with outline data
-		const frontmatter = this.renderTemplate(template.frontmatter, outline);
-		const body = this.renderTemplate(template.body, outline);
+		// Frontmatter is YAML, so we sanitize values to avoid invalid YAML (e.g. bare ':' characters)
+		const frontmatter = this.renderTemplate(template.frontmatter, outline, true);
+		const body = this.renderTemplate(template.body, outline, false);
 
 		// Combine frontmatter and body
 		let content = '';
@@ -385,17 +386,41 @@ export class OpmlImportModal extends Modal {
 		await this.app.vault.create(finalPath, content);
 	}
 
-	private renderTemplate(template: string, outline: OpmlOutline): string {
+	private renderTemplate(template: string, outline: OpmlOutline, forYaml: boolean): string {
 		let result = template;
 
+		const sanitizeForYaml = (value: string | undefined): string => {
+			if (!value) return '';
+			// For now, strip characters that commonly break unquoted YAML scalars.
+			// This is intentionally conservative per user request (e.g. ':' in titles).
+			return value
+				.replace(/[:]/g, '')   // remove colons
+				.replace(/\r?\n/g, ' ') // collapse newlines
+				.trim();
+		};
+
+		const pick = (value: string | undefined, fallback?: string): string => {
+			const v = value ?? fallback ?? '';
+			return forYaml ? sanitizeForYaml(v) : v;
+		};
+
+		// Precompute values
+		const title = pick(outline.title, outline.text);
+		const text = pick(outline.text, outline.title);
+		const xmlUrl = pick(outline.xmlUrl);
+		const htmlUrl = pick(outline.htmlUrl);
+		const type = pick(outline.type);
+		const created = pick(outline.created);
+		const category = pick(outline.category);
+
 		// Replace placeholders with outline values
-		result = result.replace(/\{\{title\}\}/g, outline.title || outline.text || '');
-		result = result.replace(/\{\{text\}\}/g, outline.text || outline.title || '');
-		result = result.replace(/\{\{xmlUrl\}\}/g, outline.xmlUrl || '');
-		result = result.replace(/\{\{htmlUrl\}\}/g, outline.htmlUrl || '');
-		result = result.replace(/\{\{type\}\}/g, outline.type || '');
-		result = result.replace(/\{\{created\}\}/g, outline.created || '');
-		result = result.replace(/\{\{category\}\}/g, outline.category || '');
+		result = result.replace(/\{\{title\}\}/g, title);
+		result = result.replace(/\{\{text\}\}/g, text);
+		result = result.replace(/\{\{xmlUrl\}\}/g, xmlUrl);
+		result = result.replace(/\{\{htmlUrl\}\}/g, htmlUrl);
+		result = result.replace(/\{\{type\}\}/g, type);
+		result = result.replace(/\{\{created\}\}/g, created);
+		result = result.replace(/\{\{category\}\}/g, category);
 
 		return result;
 	}
