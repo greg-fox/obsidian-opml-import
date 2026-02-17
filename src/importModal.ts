@@ -12,6 +12,8 @@ export interface OpmlOutline {
 	created?: string;
 	category?: string;
 	outline?: OpmlOutline[];
+	/** opml package uses "subs" for child outlines */
+	subs?: OpmlOutline[];
 }
 
 export class OpmlImportModal extends Modal {
@@ -247,26 +249,22 @@ export class OpmlImportModal extends Modal {
 			}
 
 			// Process outlines recursively
-			// Handle OPML structure: the parsed outline might have a body property
-			let rootOutline = outline;
-			if ('body' in outline && outline.body && typeof outline.body === 'object') {
-				// If body exists and has outlines, use those
-				const body = outline.body as any;
-				if (body.outline) {
-					rootOutline = body.outline as OpmlOutline;
-				} else {
-					rootOutline = body as OpmlOutline;
-				}
+			// opml package returns { opml: { head, body: { subs: [...], text?, ... } } }
+			const outlines = this.getOutlinesFromParsed(outline);
+
+			if (outlines.length === 0) {
+				this.errorMessage = 'No outline entries found in the OPML file. The file may be empty or use an unexpected structure.';
+				this.updateErrorDisplay();
+				return;
 			}
-			const outlines = this.flattenOutlines(rootOutline);
-			
+
 			// Create notes for each outline entry
 			let successCount = 0;
 			let errorCount = 0;
 
 			for (const item of outlines) {
 				try {
-					await this.createNoteFromOutline(item, this.selectedTemplate, this.selectedFolder);
+					await this.createNoteFromOutline(item, this.selectedTemplate!, this.selectedFolder!);
 					successCount++;
 				} catch (error) {
 					console.error('Error creating note:', error);
@@ -304,21 +302,40 @@ export class OpmlImportModal extends Modal {
 		});
 	}
 
+	/** Extract flat list of outline items from opml package parse result. */
+	private getOutlinesFromParsed(parsed: unknown): OpmlOutline[] {
+		const result: OpmlOutline[] = [];
+		// opml package returns { opml: { body: { subs: [ ... ] } } }
+		const opmlBody = (parsed as any)?.opml?.body;
+		if (!opmlBody) return result;
+
+		const topLevel = opmlBody.subs;
+		if (Array.isArray(topLevel)) {
+			for (const item of topLevel) {
+				result.push(...this.flattenOutlines(item as OpmlOutline));
+			}
+		} else {
+			// single body with attributes
+			if (opmlBody.text || opmlBody.title || opmlBody.xmlUrl) {
+				result.push(opmlBody as OpmlOutline);
+			}
+		}
+		return result;
+	}
+
 	private flattenOutlines(outline: OpmlOutline): OpmlOutline[] {
 		const result: OpmlOutline[] = [];
-		
 		// Add current outline if it has meaningful content
 		if (outline.text || outline.title || outline.xmlUrl) {
 			result.push(outline);
 		}
-
-		// Recursively process child outlines
-		if (outline.outline && Array.isArray(outline.outline)) {
-			for (const child of outline.outline) {
-				result.push(...this.flattenOutlines(child));
+		// opml package uses "subs" for child outlines (not "outline")
+		const children = outline.subs ?? outline.outline;
+		if (children && Array.isArray(children)) {
+			for (const child of children) {
+				result.push(...this.flattenOutlines(child as OpmlOutline));
 			}
 		}
-
 		return result;
 	}
 
