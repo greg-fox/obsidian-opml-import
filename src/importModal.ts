@@ -428,10 +428,10 @@ export class OpmlImportModal extends Modal {
 	private generateFilename(outline: OpmlOutline): string {
 		// Use title or text for filename, sanitize it
 		const name = outline.title || outline.text || 'Untitled';
-		// Remove invalid filename characters and limit length
+		// Remove invalid filename characters, collapse whitespace to single spaces, and limit length
 		return name
 			.replace(/[<>:"/\\|?*]/g, '')
-			.replace(/\s+/g, '-')
+			.replace(/\s+/g, ' ')
 			.substring(0, 100)
 			.trim() || 'Untitled';
 	}
