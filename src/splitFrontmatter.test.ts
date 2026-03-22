@@ -7,6 +7,11 @@ describe('splitFrontmatter', () => {
 		expect(splitFrontmatter(s)).toEqual({frontmatter: '', body: s});
 	});
 
+	it('returns body as full content when opening --- has no closing ---', () => {
+		const s = '---\nno closing delimiter';
+		expect(splitFrontmatter(s)).toEqual({frontmatter: '', body: s});
+	});
+
 	it('splits standard YAML frontmatter', () => {
 		const s = '---\ntitle: foo\ncreated: bar\n---\n\n# Body\n';
 		expect(splitFrontmatter(s)).toEqual({

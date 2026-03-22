@@ -1,9 +1,9 @@
 import {App, Modal, Notice, TFile, TFolder} from 'obsidian';
-import * as opml from 'opml';
 import type { OpmlOutline } from './opmlTypes';
-import { applyOpmlPlaceholders } from './opmlPlaceholders';
-import { splitFrontmatter } from './splitFrontmatter';
-import { collectVaultTemplateFiles } from './vaultTemplateSources';
+import {buildNoteContentFromTemplate} from './buildNoteContent';
+import {collectVaultTemplateFiles} from './vaultTemplateSources';
+import {generateFilenameFromOutline, getOutlinesFromParsed} from './opmlOutlines';
+import {parseOpmlString} from './parseOpml';
 
 export type { OpmlOutline };
 
@@ -223,7 +223,7 @@ export class OpmlImportModal extends Modal {
 
 		try {
 			const opmlContent = await this.app.vault.read(this.selectedFile);
-			const outline = await this.parseOpml(opmlContent);
+			const outline = await parseOpmlString(opmlContent);
 
 			if (!outline) {
 				this.errorMessage = 'Invalid OPML file format';
@@ -231,7 +231,7 @@ export class OpmlImportModal extends Modal {
 				return;
 			}
 
-			const outlines = this.getOutlinesFromParsed(outline);
+			const outlines = getOutlinesFromParsed(outline);
 
 			if (outlines.length === 0) {
 				this.errorMessage =
@@ -269,79 +269,14 @@ export class OpmlImportModal extends Modal {
 		}
 	}
 
-	private parseOpml(opmlContent: string): Promise<unknown> {
-		return new Promise((resolve, reject) => {
-			try {
-				opml.parse(opmlContent, (err: Error | null, parsed: unknown) => {
-					if (err) {
-						reject(err instanceof Error ? err : new Error(String(err)));
-						return;
-					}
-					resolve(parsed);
-				});
-			} catch (error) {
-				reject(error instanceof Error ? error : new Error(String(error)));
-			}
-		});
-	}
-
-	private getOutlinesFromParsed(parsed: unknown): OpmlOutline[] {
-		const result: OpmlOutline[] = [];
-		const opmlBody = (parsed as { opml?: { body?: unknown } })?.opml?.body;
-		if (!opmlBody) return result;
-
-		const body = opmlBody as { subs?: OpmlOutline[]; text?: string; title?: string; xmlUrl?: string };
-		const topLevel = body.subs;
-		if (Array.isArray(topLevel)) {
-			for (const item of topLevel) {
-				result.push(...this.flattenOutlines(item));
-			}
-		} else {
-			if (body.text || body.title || body.xmlUrl) {
-				result.push(body as OpmlOutline);
-			}
-		}
-		return result;
-	}
-
-	private flattenOutlines(outline: OpmlOutline): OpmlOutline[] {
-		const result: OpmlOutline[] = [];
-		if (outline.text || outline.title || outline.xmlUrl) {
-			result.push(outline);
-		}
-		const children = outline.subs ?? outline.outline;
-		if (children && Array.isArray(children)) {
-			for (const child of children) {
-				result.push(...this.flattenOutlines(child));
-			}
-		}
-		return result;
-	}
-
 	private async createNoteFromOutline(
 		outline: OpmlOutline,
 		templateContent: string,
 		folder: TFolder,
 	): Promise<void> {
-		const {frontmatter: fmRaw, body: bodyRaw} = splitFrontmatter(templateContent);
-		const frontmatter = applyOpmlPlaceholders(fmRaw, outline, true);
-		const body = applyOpmlPlaceholders(bodyRaw, outline, false);
+		const content = buildNoteContentFromTemplate(templateContent, outline);
 
-		let content = '';
-		if (frontmatter.trim()) {
-			let fm = frontmatter.trim();
-			if (!fm.startsWith('---')) {
-				fm = '---\n' + fm;
-			}
-			if (!fm.endsWith('---')) {
-				fm = fm + '\n---';
-			}
-			content = fm + '\n\n' + body;
-		} else {
-			content = body;
-		}
-
-		const filename = this.generateFilename(outline);
+		const filename = generateFilenameFromOutline(outline);
 		const filePath = folder.path === '/' ? `${filename}.md` : `${folder.path}/${filename}.md`;
 
 		let finalPath = filePath;
@@ -354,17 +289,6 @@ export class OpmlImportModal extends Modal {
 		}
 
 		await this.app.vault.create(finalPath, content);
-	}
-
-	private generateFilename(outline: OpmlOutline): string {
-		const name = outline.title || outline.text || 'Untitled';
-		return (
-			name
-				.replace(/[<>:"/\\|?*]/g, '')
-				.replace(/\s+/g, ' ')
-				.substring(0, 100)
-				.trim() || 'Untitled'
-		);
 	}
 
 	onClose() {

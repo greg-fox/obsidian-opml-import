@@ -20,7 +20,8 @@ Import [OPML](https://opml.org/spec2.opml) outlines into Markdown notes in your 
 npm install
 npm run dev      # watch build
 npm run build    # production bundle
-npm test         # unit tests
+npm test              # unit tests
+npm run test:coverage # tests + coverage (see coverage/index.html)
 npm run lint
 ```
 

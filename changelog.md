@@ -1,5 +1,11 @@
 # Changelog
 
+## 2026-02-16 (coverage)
+
+- Added unit tests for `opmlOutlines`, `buildNoteContent`, `parseOpml`, `vaultTemplateSources`, `settings` tab, and `main` plugin lifecycle; refactored import logic into pure modules for testability.
+- Vitest coverage (`@vitest/coverage-v8`): `npm run test:coverage` — HTML report at `coverage/index.html`, thresholds ≥90% lines/statements (UI `importModal` and type-only files excluded from coverage scope).
+- Vitest resolves `obsidian` to `src/test/obsidian-stub.ts` so tests run in Node without Electron.
+
 ## 2026-02-16 (later)
 
 - Restored **Import from OPML** button on the plugin settings tab (opens the same import modal as the command).
