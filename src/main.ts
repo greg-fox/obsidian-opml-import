@@ -1,4 +1,4 @@
-import {App, Plugin} from 'obsidian';
+import {Plugin} from 'obsidian';
 import {DEFAULT_SETTINGS, OpmlImportSettings, OpmlImportSettingTab} from "./settings";
 import {OpmlImportModal} from "./importModal";
 
@@ -11,9 +11,10 @@ export default class OpmlImportPlugin extends Plugin {
 		// Add command to open import modal
 		this.addCommand({
 			id: 'import-opml',
-			name: 'Import OPML File',
+			/* eslint-disable-next-line obsidianmd/ui/sentence-case -- OPML */
+			name: 'Import outlines from OPML',
 			callback: () => {
-				new OpmlImportModal(this.app, this).open();
+				new OpmlImportModal(this.app).open();
 			}
 		});
 

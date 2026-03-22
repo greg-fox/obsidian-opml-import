@@ -1,131 +1,117 @@
 import {App, Modal, Notice, TFile, TFolder} from 'obsidian';
-import OpmlImportPlugin from './main';
-import {OpmlTemplate} from './settings';
 import * as opml from 'opml';
+import type { OpmlOutline } from './opmlTypes';
+import { applyOpmlPlaceholders } from './opmlPlaceholders';
+import { splitFrontmatter } from './splitFrontmatter';
+import { collectVaultTemplateFiles } from './vaultTemplateSources';
 
-export interface OpmlOutline {
-	title?: string;
-	text?: string;
-	type?: string;
-	xmlUrl?: string;
-	htmlUrl?: string;
-	created?: string;
-	category?: string;
-	outline?: OpmlOutline[];
-	/** opml package uses "subs" for child outlines */
-	subs?: OpmlOutline[];
-}
+export type { OpmlOutline };
 
 export class OpmlImportModal extends Modal {
-	plugin: OpmlImportPlugin;
 	selectedFile: TFile | null = null;
-	selectedTemplate: OpmlTemplate | null = null;
+	selectedTemplateFile: TFile | null = null;
 	selectedFolder: TFolder | null = null;
 	errorMessage: string = '';
 
-	constructor(app: App, plugin: OpmlImportPlugin) {
+	constructor(app: App) {
 		super(app);
-		this.plugin = plugin;
 	}
 
 	onOpen() {
 		const {contentEl} = this;
 		contentEl.empty();
 
-		contentEl.createEl('h2', {text: 'Import OPML File'});
+		contentEl.createEl('h2', {text: 'Import outlines'});
 
-		// Check if templates exist
-		if (this.plugin.settings.templates.length === 0) {
+		const vaultTemplates = collectVaultTemplateFiles(this.app);
+		if (vaultTemplates.length === 0) {
 			contentEl.createEl('div', {
 				cls: 'opml-import-error',
-				text: 'No templates available. Please create at least one template in the plugin settings first.'
+				text: 'No vault templates found. Enable the core Templates plugin (Settings → Core plugins) and set a template folder, or install Templater and set its template folder. Add a Markdown file in that folder with placeholders such as {{title}} and {{text}}.',
 			});
+			contentEl.createEl('button', {text: 'Close', cls: 'mod-cta'}).addEventListener('click', () => this.close());
 			return;
 		}
 
 		// File selection
 		const fileSetting = contentEl.createDiv('opml-import-setting');
-		fileSetting.createEl('label', {text: 'OPML File', cls: 'opml-import-label'});
+		fileSetting.createEl('label', {text: 'Outline file', cls: 'opml-import-label'});
 		const fileInputContainer = fileSetting.createDiv('file-input-container');
-		
-		// File path input
+
 		const fileInput = fileInputContainer.createEl('input', {
 			type: 'text',
-			placeholder: 'Enter OPML file path (e.g., folder/file.opml)',
-			cls: 'opml-import-input'
+			placeholder: 'Path in vault (e.g. folder/export.opml)',
+			cls: 'opml-import-input',
 		});
-		fileInput.style.width = '100%';
 		fileInput.value = this.selectedFile ? this.selectedFile.path : '';
 
-		// Browse button
 		const browseButton = fileInputContainer.createEl('button', {
 			text: 'Browse',
-			cls: 'mod-cta'
+			cls: 'mod-cta',
 		});
-		// Note: browseButton handler will be set up after updateImportButton is defined
 
-		// Template selection
+		// Template selection (vault .md files from Core Templates / Templater folders)
 		const templateSetting = contentEl.createDiv('opml-import-setting');
 		templateSetting.createEl('label', {text: 'Template', cls: 'opml-import-label'});
 		const templateSelect = templateSetting.createEl('select', {cls: 'opml-import-select'});
-		
-		// Add empty option
+
 		const emptyOption = templateSelect.createEl('option', {text: 'Select a template...', value: ''});
 		emptyOption.selected = true;
 
-		// Add template options
-		this.plugin.settings.templates.forEach(template => {
-			const option = templateSelect.createEl('option', {
-				text: template.name,
-				value: template.id
-			});
-			if (this.selectedTemplate && template.id === this.selectedTemplate.id) {
-				option.selected = true;
+		const byGroup = new Map<string, typeof vaultTemplates>();
+		for (const opt of vaultTemplates) {
+			const list = byGroup.get(opt.groupLabel) ?? [];
+			list.push(opt);
+			byGroup.set(opt.groupLabel, list);
+		}
+		for (const [groupLabel, options] of byGroup) {
+			const og = templateSelect.createEl('optgroup', {attr: {label: groupLabel}});
+			for (const opt of options) {
+				const option = og.createEl('option', {
+					text: opt.file.basename,
+					value: opt.file.path,
+				});
+				if (this.selectedTemplateFile && opt.file.path === this.selectedTemplateFile.path) {
+					option.selected = true;
+					emptyOption.selected = false;
+				}
 			}
-		});
-
+		}
 
 		// Folder selection
 		const folderSetting = contentEl.createDiv('opml-import-setting');
-		folderSetting.createEl('label', {text: 'Destination Folder', cls: 'opml-import-label'});
+		folderSetting.createEl('label', {text: 'Destination folder', cls: 'opml-import-label'});
 		const folderInputContainer = folderSetting.createDiv('folder-input-container');
-		
-		// Folder path input
+
 		const folderInput = folderInputContainer.createEl('input', {
 			type: 'text',
 			placeholder: 'Enter folder path (leave empty for root)',
-			cls: 'opml-import-input'
+			cls: 'opml-import-input',
 		});
-		folderInput.style.width = '100%';
 		folderInput.value = this.selectedFolder && this.selectedFolder.path !== '/' ? this.selectedFolder.path : '';
-		
 
-		// Set default to root folder
 		if (!this.selectedFolder) {
 			this.selectedFolder = this.app.vault.getRoot();
 		}
 
-		// Error display
 		const errorDiv = contentEl.createDiv('opml-import-error');
-		errorDiv.style.display = this.errorMessage ? 'block' : 'none';
+		errorDiv.toggleVisibility(!!this.errorMessage);
 		errorDiv.textContent = this.errorMessage;
 
-		// Import button
 		const buttonContainer = contentEl.createDiv('opml-import-buttons');
 		const importButton = buttonContainer.createEl('button', {
 			text: 'Import',
-			cls: 'mod-cta'
+			cls: 'mod-cta',
 		});
-		
-		// Update button state based on form validity
+
 		const updateImportButton = () => {
-			const isValid = this.selectedFile !== null && 
-			                this.selectedTemplate !== null && 
-			                this.selectedFolder !== null;
+			const isValid =
+				this.selectedFile !== null &&
+				this.selectedTemplateFile !== null &&
+				this.selectedFolder !== null;
 			importButton.disabled = !isValid;
 		};
-		
-		// Set up event handlers
+
 		fileInput.onchange = () => {
 			const path = fileInput.value.trim();
 			if (path) {
@@ -144,15 +130,16 @@ export class OpmlImportModal extends Modal {
 			this.updateErrorDisplay();
 			updateImportButton();
 		};
-		
+
 		templateSelect.onchange = () => {
-			const selectedId = templateSelect.value;
-			this.selectedTemplate = this.plugin.settings.templates.find(t => t.id === selectedId) || null;
+			const p = templateSelect.value;
+			const f = p ? this.app.vault.getAbstractFileByPath(p) : null;
+			this.selectedTemplateFile = f instanceof TFile ? f : null;
 			this.errorMessage = '';
 			this.updateErrorDisplay();
 			updateImportButton();
 		};
-		
+
 		folderInput.onchange = () => {
 			const path = folderInput.value.trim();
 			if (!path || path === '/') {
@@ -171,16 +158,14 @@ export class OpmlImportModal extends Modal {
 			this.updateErrorDisplay();
 			updateImportButton();
 		};
-		
-		// Set up browse button handler
+
 		browseButton.onclick = () => {
-			const files = this.app.vault.getFiles().filter(f => f.extension === 'opml' || f.extension === 'xml');
+			const files = this.app.vault.getFiles().filter((f) => f.extension === 'opml' || f.extension === 'xml');
 			if (files.length === 0) {
-				new Notice('No OPML files found in vault');
+				/* eslint-disable-next-line obsidianmd/ui/sentence-case -- OPML */
+				new Notice('No OPML files found in the vault');
 				return;
 			}
-			// Show a simple selection - in a real implementation, you'd use a proper file picker
-			// For now, use the first file or allow manual entry
 			if (files.length === 1 && files[0]) {
 				this.selectedFile = files[0];
 				fileInput.value = files[0].path;
@@ -191,16 +176,15 @@ export class OpmlImportModal extends Modal {
 				new Notice(`Found ${files.length} OPML files. Please enter the file path manually.`);
 			}
 		};
-		
-		// Initial state
+
 		updateImportButton();
-		
+
 		importButton.onclick = async () => {
 			await this.performImport();
 		};
 
 		const cancelButton = buttonContainer.createEl('button', {
-			text: 'Cancel'
+			text: 'Cancel',
 		});
 		cancelButton.onclick = () => {
 			this.close();
@@ -208,22 +192,21 @@ export class OpmlImportModal extends Modal {
 	}
 
 	private updateErrorDisplay(): void {
-		const errorDiv = this.contentEl.querySelector('.opml-import-error') as HTMLElement;
-		if (errorDiv) {
+		const errorDiv = this.contentEl.querySelector('.opml-import-error');
+		if (errorDiv instanceof HTMLElement) {
 			errorDiv.textContent = this.errorMessage;
-			errorDiv.style.display = this.errorMessage ? 'block' : 'none';
+			errorDiv.toggleVisibility(!!this.errorMessage);
 		}
 	}
 
 	private async performImport(): Promise<void> {
-		// Validate inputs
 		if (!this.selectedFile) {
 			this.errorMessage = 'Please select an OPML file';
 			this.updateErrorDisplay();
 			return;
 		}
 
-		if (!this.selectedTemplate) {
+		if (!this.selectedTemplateFile) {
 			this.errorMessage = 'Please select a template';
 			this.updateErrorDisplay();
 			return;
@@ -235,36 +218,36 @@ export class OpmlImportModal extends Modal {
 			return;
 		}
 
+		const destinationFolder = this.selectedFolder;
+		const templateFile = this.selectedTemplateFile;
+
 		try {
-			// Read and parse OPML file
 			const opmlContent = await this.app.vault.read(this.selectedFile);
-			
-			// Parse OPML using the opml package
 			const outline = await this.parseOpml(opmlContent);
-			
+
 			if (!outline) {
 				this.errorMessage = 'Invalid OPML file format';
 				this.updateErrorDisplay();
 				return;
 			}
 
-			// Process outlines recursively
-			// opml package returns { opml: { head, body: { subs: [...], text?, ... } } }
 			const outlines = this.getOutlinesFromParsed(outline);
 
 			if (outlines.length === 0) {
-				this.errorMessage = 'No outline entries found in the OPML file. The file may be empty or use an unexpected structure.';
+				this.errorMessage =
+					'No outline entries found in the OPML file. The file may be empty or use an unexpected structure.';
 				this.updateErrorDisplay();
 				return;
 			}
 
-			// Create notes for each outline entry
+			const templateContent = await this.app.vault.read(templateFile);
+
 			let successCount = 0;
 			let errorCount = 0;
 
 			for (const item of outlines) {
 				try {
-					await this.createNoteFromOutline(item, this.selectedTemplate!, this.selectedFolder!);
+					await this.createNoteFromOutline(item, templateContent, destinationFolder);
 					successCount++;
 				} catch (error) {
 					console.error('Error creating note:', error);
@@ -286,38 +269,36 @@ export class OpmlImportModal extends Modal {
 		}
 	}
 
-	private parseOpml(opmlContent: string): Promise<OpmlOutline | null> {
+	private parseOpml(opmlContent: string): Promise<unknown> {
 		return new Promise((resolve, reject) => {
 			try {
-				opml.parse(opmlContent, (err: Error | null, outline: OpmlOutline) => {
+				opml.parse(opmlContent, (err: Error | null, parsed: unknown) => {
 					if (err) {
-						reject(err);
+						reject(err instanceof Error ? err : new Error(String(err)));
 						return;
 					}
-					resolve(outline);
+					resolve(parsed);
 				});
 			} catch (error) {
-				reject(error);
+				reject(error instanceof Error ? error : new Error(String(error)));
 			}
 		});
 	}
 
-	/** Extract flat list of outline items from opml package parse result. */
 	private getOutlinesFromParsed(parsed: unknown): OpmlOutline[] {
 		const result: OpmlOutline[] = [];
-		// opml package returns { opml: { body: { subs: [ ... ] } } }
-		const opmlBody = (parsed as any)?.opml?.body;
+		const opmlBody = (parsed as { opml?: { body?: unknown } })?.opml?.body;
 		if (!opmlBody) return result;
 
-		const topLevel = opmlBody.subs;
+		const body = opmlBody as { subs?: OpmlOutline[]; text?: string; title?: string; xmlUrl?: string };
+		const topLevel = body.subs;
 		if (Array.isArray(topLevel)) {
 			for (const item of topLevel) {
-				result.push(...this.flattenOutlines(item as OpmlOutline));
+				result.push(...this.flattenOutlines(item));
 			}
 		} else {
-			// single body with attributes
-			if (opmlBody.text || opmlBody.title || opmlBody.xmlUrl) {
-				result.push(opmlBody as OpmlOutline);
+			if (body.text || body.title || body.xmlUrl) {
+				result.push(body as OpmlOutline);
 			}
 		}
 		return result;
@@ -325,15 +306,13 @@ export class OpmlImportModal extends Modal {
 
 	private flattenOutlines(outline: OpmlOutline): OpmlOutline[] {
 		const result: OpmlOutline[] = [];
-		// Add current outline if it has meaningful content
 		if (outline.text || outline.title || outline.xmlUrl) {
 			result.push(outline);
 		}
-		// opml package uses "subs" for child outlines (not "outline")
 		const children = outline.subs ?? outline.outline;
 		if (children && Array.isArray(children)) {
 			for (const child of children) {
-				result.push(...this.flattenOutlines(child as OpmlOutline));
+				result.push(...this.flattenOutlines(child));
 			}
 		}
 		return result;
@@ -341,18 +320,15 @@ export class OpmlImportModal extends Modal {
 
 	private async createNoteFromOutline(
 		outline: OpmlOutline,
-		template: OpmlTemplate,
-		folder: TFolder
+		templateContent: string,
+		folder: TFolder,
 	): Promise<void> {
-		// Render template with outline data
-		// Frontmatter is YAML, so we sanitize values to avoid invalid YAML (e.g. bare ':' characters)
-		const frontmatter = this.renderTemplate(template.frontmatter, outline, true);
-		const body = this.renderTemplate(template.body, outline, false);
+		const {frontmatter: fmRaw, body: bodyRaw} = splitFrontmatter(templateContent);
+		const frontmatter = applyOpmlPlaceholders(fmRaw, outline, true);
+		const body = applyOpmlPlaceholders(bodyRaw, outline, false);
 
-		// Combine frontmatter and body
 		let content = '';
 		if (frontmatter.trim()) {
-			// Ensure frontmatter has proper YAML delimiters
 			let fm = frontmatter.trim();
 			if (!fm.startsWith('---')) {
 				fm = '---\n' + fm;
@@ -365,75 +341,30 @@ export class OpmlImportModal extends Modal {
 			content = body;
 		}
 
-		// Generate filename from title or text
 		const filename = this.generateFilename(outline);
-		const filePath = folder.path === '/' 
-			? `${filename}.md` 
-			: `${folder.path}/${filename}.md`;
+		const filePath = folder.path === '/' ? `${filename}.md` : `${folder.path}/${filename}.md`;
 
-		// Check if file already exists and add suffix if needed
 		let finalPath = filePath;
 		let counter = 1;
 		while (await this.app.vault.adapter.exists(finalPath)) {
 			const baseName = filename + (counter > 1 ? `-${counter - 1}` : '');
-			finalPath = folder.path === '/' 
-				? `${baseName}-${counter}.md` 
-				: `${folder.path}/${baseName}-${counter}.md`;
+			finalPath =
+				folder.path === '/' ? `${baseName}-${counter}.md` : `${folder.path}/${baseName}-${counter}.md`;
 			counter++;
 		}
 
-		// Create the note
 		await this.app.vault.create(finalPath, content);
 	}
 
-	private renderTemplate(template: string, outline: OpmlOutline, forYaml: boolean): string {
-		let result = template;
-
-		const sanitizeForYaml = (value: string | undefined): string => {
-			if (!value) return '';
-			// For now, strip characters that commonly break unquoted YAML scalars.
-			// This is intentionally conservative per user request (e.g. ':' in titles).
-			return value
-				.replace(/[:]/g, '')   // remove colons
-				.replace(/\r?\n/g, ' ') // collapse newlines
-				.trim();
-		};
-
-		const pick = (value: string | undefined, fallback?: string): string => {
-			const v = value ?? fallback ?? '';
-			return forYaml ? sanitizeForYaml(v) : v;
-		};
-
-		// Precompute values
-		const title = pick(outline.title, outline.text);
-		const text = pick(outline.text, outline.title);
-		const xmlUrl = pick(outline.xmlUrl);
-		const htmlUrl = pick(outline.htmlUrl);
-		const type = pick(outline.type);
-		const created = pick(outline.created);
-		const category = pick(outline.category);
-
-		// Replace placeholders with outline values
-		result = result.replace(/\{\{title\}\}/g, title);
-		result = result.replace(/\{\{text\}\}/g, text);
-		result = result.replace(/\{\{xmlUrl\}\}/g, xmlUrl);
-		result = result.replace(/\{\{htmlUrl\}\}/g, htmlUrl);
-		result = result.replace(/\{\{type\}\}/g, type);
-		result = result.replace(/\{\{created\}\}/g, created);
-		result = result.replace(/\{\{category\}\}/g, category);
-
-		return result;
-	}
-
 	private generateFilename(outline: OpmlOutline): string {
-		// Use title or text for filename, sanitize it
 		const name = outline.title || outline.text || 'Untitled';
-		// Remove invalid filename characters, collapse whitespace to single spaces, and limit length
-		return name
-			.replace(/[<>:"/\\|?*]/g, '')
-			.replace(/\s+/g, ' ')
-			.substring(0, 100)
-			.trim() || 'Untitled';
+		return (
+			name
+				.replace(/[<>:"/\\|?*]/g, '')
+				.replace(/\s+/g, ' ')
+				.substring(0, 100)
+				.trim() || 'Untitled'
+		);
 	}
 
 	onClose() {
