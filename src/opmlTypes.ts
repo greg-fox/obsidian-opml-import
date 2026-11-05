@@ -1,4 +1,4 @@
-/** Shape of a single outline node from the opml package / OPML attributes */
+/** A single `<outline>` element from an OPML document. */
 export interface OpmlOutline {
 	title?: string;
 	text?: string;
@@ -7,7 +7,6 @@ export interface OpmlOutline {
 	htmlUrl?: string;
 	created?: string;
 	category?: string;
-	outline?: OpmlOutline[];
-	/** opml package uses "subs" for child outlines */
-	subs?: OpmlOutline[];
+	/** Nested `<outline>` elements, in document order. */
+	children?: OpmlOutline[];
 }

@@ -19,7 +19,8 @@ export function buildNoteContentFromTemplate(templateContent: string, outline: O
 		if (!fm.endsWith('---')) {
 			fm = fm + '\n---';
 		}
-		return fm + '\n\n' + body;
+		// The body keeps its own leading blank lines, so the template's spacing is preserved.
+		return fm + '\n' + body;
 	}
 	return body;
 }

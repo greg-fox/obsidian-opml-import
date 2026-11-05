@@ -1,47 +1,42 @@
-import type { OpmlOutline } from './opmlTypes';
+import type {OpmlOutline} from './opmlTypes';
 
-/** Flatten parsed OPML package output into a list of outline rows with content. */
-export function getOutlinesFromParsed(parsed: unknown): OpmlOutline[] {
+/**
+ * Flatten an outline tree into the rows that should become notes, in document order.
+ *
+ * - An outline with an `xmlUrl` is always a row (it is a feed), even if it has children.
+ * - An outline with children and no `xmlUrl` is a container (for example a category folder)
+ *   and is skipped; its children are still visited.
+ * - A leaf outline is a row when it has a `title`, `text`, or `htmlUrl`.
+ */
+export function collectImportableOutlines(outlines: OpmlOutline[]): OpmlOutline[] {
 	const result: OpmlOutline[] = [];
-	const opmlBody = (parsed as { opml?: { body?: unknown } })?.opml?.body;
-	if (!opmlBody) return result;
-
-	const body = opmlBody as { subs?: OpmlOutline[]; text?: string; title?: string; xmlUrl?: string };
-	const topLevel = body.subs;
-	if (Array.isArray(topLevel)) {
-		for (const item of topLevel) {
-			result.push(...flattenOutlines(item));
+	for (const outline of outlines) {
+		const children = outline.children ?? [];
+		const isContainer = children.length > 0 && !outline.xmlUrl;
+		if (!isContainer && hasContent(outline)) {
+			result.push(outline);
 		}
-	} else {
-		if (body.text || body.title || body.xmlUrl) {
-			result.push(body as OpmlOutline);
-		}
+		result.push(...collectImportableOutlines(children));
 	}
 	return result;
 }
 
-export function flattenOutlines(outline: OpmlOutline): OpmlOutline[] {
-	const result: OpmlOutline[] = [];
-	if (outline.text || outline.title || outline.xmlUrl) {
-		result.push(outline);
-	}
-	const children = outline.subs ?? outline.outline;
-	if (children && Array.isArray(children)) {
-		for (const child of children) {
-			result.push(...flattenOutlines(child));
-		}
-	}
-	return result;
+function hasContent(outline: OpmlOutline): boolean {
+	return Boolean(outline.title || outline.text || outline.xmlUrl || outline.htmlUrl);
 }
 
-/** Safe note title from outline fields (matches import behavior). */
+/** Characters that are invalid in file names or that break wikilinks, block refs, or headings. */
+const UNSAFE_FILENAME_CHARS = /[\\/:*?"<>|#^[\]]/g;
+const MAX_FILENAME_LENGTH = 100;
+
+/** Note name (without extension) derived from an outline's title, then text. */
 export function generateFilenameFromOutline(outline: OpmlOutline): string {
-	const name = outline.title || outline.text || 'Untitled';
-	return (
-		name
-			.replace(/[<>:"/\\|?*]/g, '')
-			.replace(/\s+/g, ' ')
-			.substring(0, 100)
-			.trim() || 'Untitled'
-	);
+	const name = (outline.title || outline.text || '')
+		.replace(UNSAFE_FILENAME_CHARS, '')
+		.replace(/\s+/g, ' ')
+		.trim()
+		.replace(/^\.+/, '')
+		.substring(0, MAX_FILENAME_LENGTH)
+		.trim();
+	return name || 'Untitled';
 }

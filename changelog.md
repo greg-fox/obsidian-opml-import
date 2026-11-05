@@ -1,9 +1,25 @@
 # Changelog
 
+## 2026-11-05
+
+- **Fixed:** URLs in frontmatter lost their colons (`https//...`). Frontmatter values are now written as quoted YAML strings, with escaping for values inside existing quotes, flow lists, and block scalars.
+- **Fixed:** Container outlines (such as `feeds` in an Overcast export) were imported as notes. Outlines with children and no `xmlUrl` are now skipped; their children are still imported.
+- **Fixed:** Duplicate note names produced `X-1`, `X-1-2`, `X-2-3`. Duplicates are now `X 1`, `X 2`, `X 3`.
+- **Fixed:** Placeholders were substituted in sequence, so a value containing `{{xmlUrl}}` was replaced again. Substitution is now a single pass.
+- **Fixed:** Note names now also drop `#`, `^`, `[`, `]`, and leading dots, and paths go through `normalizePath`.
+- **Fixed:** The template's spacing between frontmatter and body is preserved instead of gaining an extra blank line.
+- **Changed:** Replaced the `opml` npm package with a `DOMParser`-based parser. The bundle shrinks from about 890 KB to about 14 KB and no longer pulls in Node built-ins, so the plugin can load on mobile.
+- **Added:** The import dialog previews the number of notes, the destination, and the first few note names before importing.
+- **Added:** A missing destination folder (and its parents) is created during import. A path that points at a file is rejected.
+- **Changed:** The import dialog uses Obsidian's `Setting` components and `Modal.setTitle`; the Import button is disabled while an import runs.
+- **Changed:** `minAppVersion` raised to 1.4.0 (`Vault.createFolder`).
+- **Tests:** Added specs for the import dialog and note creation; tests run in happy-dom with an in-memory vault. `importModal.ts` is no longer excluded from coverage.
+- Cleaned up `styles.css`: removed sample comments and unused rules, prefixed all classes, and switched to Obsidian spacing and radius variables.
+
 ## 2026-02-16 (coverage)
 
 - Added unit tests for `opmlOutlines`, `buildNoteContent`, `parseOpml`, `vaultTemplateSources`, `settings` tab, and `main` plugin lifecycle; refactored import logic into pure modules for testability.
-- Vitest coverage (`@vitest/coverage-v8`): `npm run test:coverage` — HTML report at `coverage/index.html`, thresholds ≥90% lines/statements (UI `importModal` and type-only files excluded from coverage scope).
+- Vitest coverage (`@vitest/coverage-v8`): `npm run test:coverage`: HTML report at `coverage/index.html`, thresholds ≥90% lines/statements (UI `importModal` and type-only files excluded from coverage scope).
 - Vitest resolves `obsidian` to `src/test/obsidian-stub.ts` so tests run in Node without Electron.
 
 ## 2026-02-16 (later)
