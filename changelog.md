@@ -1,5 +1,13 @@
 # Changelog
 
+## 2026-11-05 (store preparation)
+
+- **Changed:** Template folders are now read from the saved settings of the core Templates plugin and Templater (`core-plugins.json`, `templates.json`, `community-plugins.json`, and Templater's `data.json` in the vault's config folder) instead of through undocumented `app.internalPlugins` / `app.plugins` objects. The config folder comes from `Vault#configDir`, so renamed config folders work.
+- **Changed:** Checking whether a note name is taken uses the Vault API instead of `vault.adapter.exists`, and ignores case so a new `show.md` is never created next to an existing `Show.md`.
+- **Changed:** `obsidian` moved to `devDependencies` and pinned to 1.10.3.
+- Added a GitHub Actions release workflow: pushing a tag that matches `manifest.json`'s version runs lint, tests, and the build, then creates a draft release with `main.js`, `manifest.json`, and `styles.css`. CI now also runs the tests.
+- `LICENSE` now names Greg Fox; removed the empty `fundingUrl` from `manifest.json`.
+
 ## 2026-11-05
 
 - **Fixed:** URLs in frontmatter lost their colons (`https//...`). Frontmatter values are now written as quoted YAML strings, with escaping for values inside existing quotes, flow lists, and block scalars.

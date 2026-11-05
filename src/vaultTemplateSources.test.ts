@@ -1,5 +1,3 @@
-/* eslint-disable obsidianmd/no-tfile-tfolder-cast -- test doubles use prototype inheritance */
-import {TFile, TFolder} from 'obsidian';
 import type {App} from 'obsidian';
 import {describe, expect, it} from 'vitest';
 import {
@@ -7,163 +5,139 @@ import {
 	getTemplateFolderSources,
 	listMarkdownTemplatesInFolder,
 } from './vaultTemplateSources';
+import {createFakeVault, type FakeVaultOptions} from './test/fakeVault';
+import {TFolder} from './test/obsidian-stub';
 
-function mkFile(path: string): TFile {
-	const f = Object.create(TFile.prototype) as TFile;
-	f.path = path;
-	f.basename = path.split('/').pop() ?? path;
-	f.extension = 'md';
-	return f;
-}
+const appWith = (options: FakeVaultOptions) => createFakeVault(options).app as unknown as App;
 
-function mkFolder(path: string): TFolder {
-	const f = Object.create(TFolder.prototype) as TFolder;
-	f.path = path;
-	return f;
-}
-
-function mkApp(overrides: Partial<App> & {vault: App['vault']}): App {
-	return overrides as App;
-}
+const templater = (settings: Record<string, unknown>, enabled = true): FakeVaultOptions['config'] => ({
+	'community-plugins.json': enabled ? ['templater-obsidian'] : [],
+	'plugins/templater-obsidian/data.json': settings,
+});
 
 describe('getTemplateFolderSources', () => {
-	it('reads core Templates folder from object-based internal plugins', () => {
-		const app = mkApp({
-			internalPlugins: {
-				plugins: {
-					templates: {
-						enabled: true,
-						instance: {options: {folder: 'ObjTemplates'}},
-					},
-				},
-			},
-			vault: {getAbstractFileByPath: () => null, getMarkdownFiles: () => []},
-		} as unknown as App);
-		expect(getTemplateFolderSources(app)[0]?.folderPath).toBe('ObjTemplates');
-	});
-
-	it('reads core Templates folder from Map-based internal plugins', () => {
-		const plugins = new Map();
-		plugins.set('templates', {
-			enabled: true,
-			instance: {options: {folder: 'MyTemplates'}},
-		});
-		const app = mkApp({
-			internalPlugins: {plugins},
-			vault: {getAbstractFileByPath: () => null, getMarkdownFiles: () => []},
-		} as unknown as App);
-		const sources = getTemplateFolderSources(app);
-		expect(sources).toEqual([
+	it('reads the core Templates folder when the plugin is enabled (object format)', async () => {
+		expect(await getTemplateFolderSources(appWith({templatesFolder: 'MyTemplates'}))).toEqual([
 			{kind: 'core-templates', label: 'Core Templates', folderPath: 'MyTemplates'},
 		]);
 	});
 
-	it('reads Templater templates_folder', () => {
-		const app = mkApp({
-			internalPlugins: {plugins: new Map()},
-			plugins: {
-				plugins: {
-					'templater-obsidian': {settings: {templates_folder: 'Templ'}},
-				},
-			},
-			vault: {getAbstractFileByPath: () => null, getMarkdownFiles: () => []},
-		} as unknown as App);
-		expect(getTemplateFolderSources(app)).toEqual([
-			{kind: 'templater', label: 'Templater', folderPath: 'Templ'},
-		]);
+	it('reads the core Templates folder when the plugin is enabled (array format)', async () => {
+		const app = appWith({templatesFolder: 'T', config: {'core-plugins.json': ['file-explorer', 'templates']}});
+		expect((await getTemplateFolderSources(app))[0]?.folderPath).toBe('T');
 	});
 
-	it('dedupes same folder path from core and templater', () => {
-		const plugins = new Map();
-		plugins.set('templates', {
-			enabled: true,
-			instance: {options: {folder: 'Shared'}},
+	it('ignores the core Templates folder when the plugin is disabled', async () => {
+		const objectFormat = appWith({templatesFolder: 'T', config: {'core-plugins.json': {templates: false}}});
+		const arrayFormat = appWith({templatesFolder: 'T', config: {'core-plugins.json': ['file-explorer']}});
+		expect(await getTemplateFolderSources(objectFormat)).toEqual([]);
+		expect(await getTemplateFolderSources(arrayFormat)).toEqual([]);
+	});
+
+	it('ignores an empty or missing core Templates folder', async () => {
+		expect(await getTemplateFolderSources(appWith({templatesFolder: '  '}))).toEqual([]);
+		expect(await getTemplateFolderSources(appWith({config: {'templates.json': {}}}))).toEqual([]);
+	});
+
+	it('normalizes folder paths', async () => {
+		expect((await getTemplateFolderSources(appWith({templatesFolder: '/Templates/'})))[0]?.folderPath).toBe(
+			'Templates',
+		);
+	});
+
+	it('reads the Templater templates_folder when Templater is enabled', async () => {
+		const app = appWith({templatesFolder: null, config: templater({templates_folder: 'Templ'})});
+		expect(await getTemplateFolderSources(app)).toEqual([{kind: 'templater', label: 'Templater', folderPath: 'Templ'}]);
+	});
+
+	it('falls back to the Templater folder setting', async () => {
+		const app = appWith({templatesFolder: null, config: templater({folder: 'Alt'})});
+		expect((await getTemplateFolderSources(app))[0]?.folderPath).toBe('Alt');
+	});
+
+	it('ignores Templater when it is disabled or has no folder', async () => {
+		expect(
+			await getTemplateFolderSources(appWith({templatesFolder: null, config: templater({templates_folder: 'T'}, false)})),
+		).toEqual([]);
+		expect(await getTemplateFolderSources(appWith({templatesFolder: null, config: templater({})}))).toEqual([]);
+	});
+
+	it('lists both sources and drops a duplicate folder', async () => {
+		const both = appWith({templatesFolder: 'Core', config: templater({templates_folder: 'Templ'})});
+		expect((await getTemplateFolderSources(both)).map((s) => s.kind)).toEqual(['core-templates', 'templater']);
+
+		const shared = appWith({templatesFolder: 'Shared', config: templater({templates_folder: 'Shared/'})});
+		expect(await getTemplateFolderSources(shared)).toHaveLength(1);
+	});
+
+	it('treats missing or malformed config files as not configured', async () => {
+		const app = appWith({
+			templatesFolder: null,
+			config: {'community-plugins.json': {not: 'a list'}, 'plugins/templater-obsidian/data.json': ['x']},
 		});
-		const app = mkApp({
-			internalPlugins: {plugins},
-			plugins: {
-				plugins: {
-					'templater-obsidian': {settings: {templates_folder: 'Shared'}},
-				},
-			},
-			vault: {getAbstractFileByPath: () => null, getMarkdownFiles: () => []},
-		} as unknown as App);
-		expect(getTemplateFolderSources(app)).toHaveLength(1);
-	});
+		expect(await getTemplateFolderSources(app)).toEqual([]);
 
-	it('falls back to templater settings.folder', () => {
-		const app = mkApp({
-			internalPlugins: {plugins: new Map()},
-			plugins: {
-				plugins: {
-					'templater-obsidian': {settings: {folder: 'Alt'}},
-				},
-			},
-			vault: {getAbstractFileByPath: () => null, getMarkdownFiles: () => []},
-		} as unknown as App);
-		expect(getTemplateFolderSources(app)[0]?.folderPath).toBe('Alt');
+		const vault = createFakeVault();
+		vault.app.vault.adapter.read = () => Promise.resolve('{not json');
+		expect(await getTemplateFolderSources(vault.app as unknown as App)).toEqual([]);
 	});
 });
 
 describe('listMarkdownTemplatesInFolder', () => {
-	it('returns markdown files under folder path', () => {
-		const folder = mkFolder('Templates');
-		const app = mkApp({
-			vault: {
-				getAbstractFileByPath: (p: string) => (p === 'Templates' ? folder : null),
-				getMarkdownFiles: () => [
-					mkFile('Templates/a.md'),
-					mkFile('Templates/nested/b.md'),
-					mkFile('Other/x.md'),
-				],
-			},
-		} as unknown as App);
-		const files = listMarkdownTemplatesInFolder(app, 'Templates');
-		expect(files.map((f) => f.path).sort()).toEqual(['Templates/a.md', 'Templates/nested/b.md']);
+	const app = appWith({
+		files: {'Templates/a.md': '', 'Templates/nested/b.md': '', 'Templates/c.opml': '', 'Other/x.md': '', 'root.md': ''},
 	});
 
-	it('returns top-level files only for vault root folder', () => {
-		const root = mkFolder('');
-		const app = mkApp({
-			vault: {
-				getAbstractFileByPath: (p: string) => (p === '' ? root : null),
-				getMarkdownFiles: () => [mkFile('root.md'), mkFile('sub/x.md')],
-			},
-		} as unknown as App);
-		const files = listMarkdownTemplatesInFolder(app, '');
-		expect(files.map((f) => f.path)).toEqual(['root.md']);
+	it('returns markdown files under the folder, including nested ones', () => {
+		expect(listMarkdownTemplatesInFolder(app, 'Templates').map((f) => f.path)).toEqual([
+			'Templates/a.md',
+			'Templates/nested/b.md',
+		]);
 	});
 
-	it('returns empty when folder missing', () => {
-		const app = mkApp({
-			vault: {
-				getAbstractFileByPath: () => null,
-				getMarkdownFiles: () => [],
-			},
-		} as unknown as App);
+	it('does not match folders that share a prefix', () => {
+		const prefixed = appWith({files: {'Templates/a.md': '', 'Templates-old/b.md': ''}});
+		expect(listMarkdownTemplatesInFolder(prefixed, 'Templates').map((f) => f.path)).toEqual(['Templates/a.md']);
+	});
+
+	it('returns top-level files only for the vault root', () => {
+		const root = createFakeVault({files: {'root.md': '', 'sub/x.md': ''}});
+		const rootFolder = Object.assign(new TFolder(), {path: '/'});
+		root.app.vault.getAbstractFileByPath = (p) => (p === '/' ? rootFolder : null);
+		expect(listMarkdownTemplatesInFolder(root.app as unknown as App, '/').map((f) => f.path)).toEqual(['root.md']);
+	});
+
+	it('returns nothing when the folder is missing or is a file', () => {
 		expect(listMarkdownTemplatesInFolder(app, 'nope')).toEqual([]);
+		expect(listMarkdownTemplatesInFolder(app, 'root.md')).toEqual([]);
 	});
 });
 
 describe('collectVaultTemplateFiles', () => {
-	it('merges files from sources with group labels', () => {
-		const plugins = new Map();
-		plugins.set('templates', {
-			enabled: true,
-			instance: {options: {folder: 'T'}},
+	it('merges templates from all sources with group labels', async () => {
+		const app = appWith({
+			templatesFolder: 'Core',
+			config: templater({templates_folder: 'Templ'}),
+			files: {'Core/one.md': '', 'Templ/two.md': ''},
 		});
-		const folder = mkFolder('T');
-		const f1 = mkFile('T/one.md');
-		const app = mkApp({
-			internalPlugins: {plugins},
-			vault: {
-				getAbstractFileByPath: (p: string) => (p === 'T' ? folder : null),
-				getMarkdownFiles: () => [f1],
-			},
-		} as unknown as App);
-		const opts = collectVaultTemplateFiles(app);
-		expect(opts).toHaveLength(1);
-		expect(opts[0]?.file.path).toBe('T/one.md');
-		expect(opts[0]?.groupLabel).toContain('Core Templates');
+		expect((await collectVaultTemplateFiles(app)).map((o) => [o.file.path, o.groupLabel])).toEqual([
+			['Core/one.md', 'Core Templates (Core)'],
+			['Templ/two.md', 'Templater (Templ)'],
+		]);
+	});
+
+	it('lists a template only once when folders overlap', async () => {
+		const app = appWith({
+			templatesFolder: 'T',
+			config: templater({templates_folder: 'T/sub'}),
+			files: {'T/sub/a.md': ''},
+		});
+		const options = await collectVaultTemplateFiles(app);
+		expect(options).toHaveLength(1);
+		expect(options[0]?.groupLabel).toBe('Core Templates (T)');
+	});
+
+	it('returns nothing when no template plugin is configured', async () => {
+		expect(await collectVaultTemplateFiles(appWith({templatesFolder: null, files: {'T/a.md': ''}}))).toEqual([]);
 	});
 });

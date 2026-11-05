@@ -43,13 +43,13 @@ export class OpmlImportModal extends Modal {
 		super(app);
 	}
 
-	onOpen(): void {
+	async onOpen(): Promise<void> {
 		const {contentEl} = this;
 		contentEl.empty();
 		this.modalEl.addClass('opml-import-modal');
 		this.setTitle('Import outlines');
 
-		const templates = collectVaultTemplateFiles(this.app);
+		const templates = await collectVaultTemplateFiles(this.app);
 		if (templates.length === 0) {
 			this.renderNoTemplates();
 			return;

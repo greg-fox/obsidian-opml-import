@@ -6,6 +6,5 @@
 	"description": "Import OPML files and create notes for each entry using customizable templates.",
 	"author": "Greg Fox",
 	"authorUrl": "https://gf-tech.com",
-	"fundingUrl": "",
 	"isDesktopOnly": false
 }
