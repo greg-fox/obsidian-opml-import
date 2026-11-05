@@ -9,7 +9,7 @@ const isOpen = (modal: OpmlImportModal) => (modal as unknown as {isOpen: boolean
 
 const TEMPLATE = '---\ntitle: {{title}}\nxmlUrl: {{xmlUrl}}\n---\n# {{title}}\n';
 
-function setup(options: FakeVaultOptions = {}) {
+async function setup(options: FakeVaultOptions = {}) {
 	const vault = createFakeVault({
 		files: {
 			'Templates/Podcast.md': TEMPLATE,
@@ -22,6 +22,7 @@ function setup(options: FakeVaultOptions = {}) {
 	const modal = new OpmlImportModal(vault.app as unknown as App);
 	modal.open();
 	const el = modal.contentEl;
+	await vi.waitFor(() => expect(el.childElementCount).toBeGreaterThan(0));
 
 	const settingByName = (name: string) => {
 		const setting = Array.from(el.querySelectorAll('.setting-item')).find(
@@ -65,8 +66,8 @@ describe('OpmlImportModal', () => {
 	});
 
 	describe('rendering', () => {
-		it('shows the title, form fields, and a disabled import button', () => {
-			const {modal, el, button} = setup();
+		it('shows the title, form fields, and a disabled import button', async () => {
+			const {modal, el, button} = await setup();
 			expect(modal.titleEl.textContent).toBe('Import outlines');
 			expect(modal.modalEl.classList.contains('opml-import-modal')).toBe(true);
 			expect(el.textContent).toContain('Outline file');
@@ -75,8 +76,8 @@ describe('OpmlImportModal', () => {
 			expect(button('Import').disabled).toBe(true);
 		});
 
-		it('groups templates by source folder', () => {
-			const {select} = setup({files: {'Templates/Sub/Other.md': 'x'}});
+		it('groups templates by source folder', async () => {
+			const {select} = await setup({files: {'Templates/Sub/Other.md': 'x'}});
 			const group = select().querySelector('optgroup');
 			expect(group?.getAttribute('label')).toBe('Core Templates (Templates)');
 			expect(Array.from(group?.querySelectorAll('option') ?? []).map((o) => o.value)).toEqual([
@@ -86,22 +87,22 @@ describe('OpmlImportModal', () => {
 			expect(select().querySelector('option')?.value).toBe('');
 		});
 
-		it('hides the preview and error until there is something to show', () => {
-			const {previewEl, errorEl, isShown} = setup();
+		it('hides the preview and error until there is something to show', async () => {
+			const {previewEl, errorEl, isShown} = await setup();
 			expect(isShown(previewEl())).toBe(false);
 			expect(isShown(errorEl())).toBe(false);
 		});
 
-		it('explains how to add templates when none are configured', () => {
-			const {el, modal, button} = setup({templatesFolder: null});
+		it('explains how to add templates when none are configured', async () => {
+			const {el, modal, button} = await setup({templatesFolder: null});
 			expect(el.querySelector('.opml-import-error')?.textContent).toContain('No templates found');
 			expect(el.querySelector('input')).toBeNull();
 			button('Close').click();
 			expect(isOpen(modal)).toBe(false);
 		});
 
-		it('empties the content when closed', () => {
-			const {modal, button} = setup();
+		it('empties the content when closed', async () => {
+			const {modal, button} = await setup();
 			button('Cancel').click();
 			expect(isOpen(modal)).toBe(false);
 			expect(modal.contentEl.childElementCount).toBe(0);
@@ -110,7 +111,7 @@ describe('OpmlImportModal', () => {
 
 	describe('outline file', () => {
 		it('loads entries and previews the notes to be created', async () => {
-			const {modal, input, change, previewEl, isShown} = setup();
+			const {modal, input, change, previewEl, isShown} = await setup();
 			change(input('Outline file'), ' Imports/podcasts.opml ');
 			await vi.waitFor(() => expect(modal.outlines).toHaveLength(3));
 			expect(isShown(previewEl())).toBe(true);
@@ -124,7 +125,7 @@ describe('OpmlImportModal', () => {
 
 		it('limits the preview list and summarizes the rest', async () => {
 			const outlines = Array.from({length: 8}, (_, i) => `<outline text="Show ${i}"/>`).join('');
-			const {modal, previewEl} = setup({files: {'big.opml': `<opml><body>${outlines}</body></opml>`}});
+			const {modal, previewEl} = await setup({files: {'big.opml': `<opml><body>${outlines}</body></opml>`}});
 			await modal.selectOutlineFile('big.opml');
 			const items = Array.from(previewEl().querySelectorAll('li')).map((li) => li.textContent);
 			expect(items).toHaveLength(6);
@@ -132,19 +133,19 @@ describe('OpmlImportModal', () => {
 		});
 
 		it('uses singular wording for a single note', async () => {
-			const {modal, previewEl} = setup({files: {'one.opml': '<opml><body><outline text="Solo"/></body></opml>'}});
+			const {modal, previewEl} = await setup({files: {'one.opml': '<opml><body><outline text="Solo"/></body></opml>'}});
 			await modal.selectOutlineFile('one.opml');
 			expect(previewEl().textContent).toContain('1 note will be created');
 		});
 
 		it('accepts .xml files', async () => {
-			const {modal} = setup({files: {'feeds.XML': PODCAST_OPML}});
+			const {modal} = await setup({files: {'feeds.XML': PODCAST_OPML}});
 			await modal.selectOutlineFile('feeds.XML');
 			expect(modal.outlines).toHaveLength(3);
 		});
 
 		it('reports a path that is missing or not an outline file', async () => {
-			const {modal, errorEl, isShown} = setup();
+			const {modal, errorEl, isShown} = await setup();
 			await modal.selectOutlineFile('nope.opml');
 			expect(errorEl().textContent).toBe('No .opml or .xml file exists at that path.');
 			expect(isShown(errorEl())).toBe(true);
@@ -154,7 +155,7 @@ describe('OpmlImportModal', () => {
 		});
 
 		it('reports a file that cannot be parsed', async () => {
-			const {modal, errorEl, button} = setup({files: {'bad.opml': 'not xml'}});
+			const {modal, errorEl, button} = await setup({files: {'bad.opml': 'not xml'}});
 			await modal.selectOutlineFile('bad.opml');
 			expect(errorEl().textContent).toBe('Could not read the outline file: The file is not valid XML.');
 			expect(modal.outlines).toEqual([]);
@@ -162,13 +163,13 @@ describe('OpmlImportModal', () => {
 		});
 
 		it('reports a file with no importable entries', async () => {
-			const {modal, errorEl} = setup({files: {'empty.opml': '<opml><body/></opml>'}});
+			const {modal, errorEl} = await setup({files: {'empty.opml': '<opml><body/></opml>'}});
 			await modal.selectOutlineFile('empty.opml');
 			expect(errorEl().textContent).toBe('No outline entries found in this file.');
 		});
 
 		it('clears the selection and error when the path is emptied', async () => {
-			const {modal, errorEl, isShown} = setup();
+			const {modal, errorEl, isShown} = await setup();
 			await modal.selectOutlineFile('nope.opml');
 			await modal.selectOutlineFile('   ');
 			expect(modal.outlineFile).toBeNull();
@@ -178,23 +179,24 @@ describe('OpmlImportModal', () => {
 
 	describe('browse', () => {
 		it('selects the only outline file in the vault', async () => {
-			const {modal, button, input} = setup();
+			const {modal, button, input} = await setup();
 			button('Browse').click();
 			await vi.waitFor(() => expect(modal.outlines).toHaveLength(3));
 			expect(input('Outline file').value).toBe('Imports/podcasts.opml');
 		});
 
-		it('asks for a path when there are several outline files', () => {
-			const {modal, button} = setup({files: {'second.xml': PODCAST_OPML}});
+		it('asks for a path when there are several outline files', async () => {
+			const {modal, button} = await setup({files: {'second.xml': PODCAST_OPML}});
 			button('Browse').click();
 			expect(notices).toEqual(['Found 2 outline files. Enter the path of the one to import.']);
 			expect(modal.outlineFile).toBeNull();
 		});
 
-		it('reports when there are no outline files', () => {
+		it('reports when there are no outline files', async () => {
 			const vault = createFakeVault({files: {'Templates/Podcast.md': TEMPLATE}});
 			const modal = new OpmlImportModal(vault.app as unknown as App);
 			modal.open();
+			await vi.waitFor(() => expect(modal.contentEl.childElementCount).toBeGreaterThan(0));
 			Array.from(modal.contentEl.querySelectorAll('button'))
 				.find((b) => b.textContent === 'Browse')
 				?.click();
@@ -204,14 +206,14 @@ describe('OpmlImportModal', () => {
 
 	describe('template and destination', () => {
 		it('enables import once a file and template are chosen', async () => {
-			const {fillForm, button, modal} = setup();
+			const {fillForm, button, modal} = await setup();
 			await fillForm();
 			expect(modal.templateFile?.path).toBe('Templates/Podcast.md');
 			expect(button('Import').disabled).toBe(false);
 		});
 
 		it('disables import again when the template is cleared', async () => {
-			const {fillForm, change, select, button, modal} = setup();
+			const {fillForm, change, select, button, modal} = await setup();
 			await fillForm();
 			change(select(), '');
 			expect(modal.templateFile).toBeNull();
@@ -219,21 +221,21 @@ describe('OpmlImportModal', () => {
 		});
 
 		it('previews an existing destination folder', async () => {
-			const {fillForm, previewEl} = setup({folders: ['Podcasts']});
+			const {fillForm, previewEl} = await setup({folders: ['Podcasts']});
 			await fillForm(undefined, undefined, '/Podcasts/');
 			expect(previewEl().textContent).toContain('3 notes will be created in Podcasts.');
 			expect(previewEl().textContent).not.toContain('The folder');
 		});
 
 		it('previews that a missing destination folder will be created', async () => {
-			const {fillForm, previewEl, button} = setup();
+			const {fillForm, previewEl, button} = await setup();
 			await fillForm(undefined, undefined, 'New/Shows');
 			expect(previewEl().textContent).toContain('The folder New/Shows will be created.');
 			expect(button('Import').disabled).toBe(false);
 		});
 
 		it('rejects a destination that is a file', async () => {
-			const {fillForm, errorEl, button} = setup();
+			const {fillForm, errorEl, button} = await setup();
 			await fillForm(undefined, undefined, 'Templates/Podcast.md');
 			expect(errorEl().textContent).toBe('"Templates/Podcast.md" is a file, not a folder.');
 			expect(button('Import').disabled).toBe(true);
@@ -242,7 +244,7 @@ describe('OpmlImportModal', () => {
 
 	describe('import', () => {
 		it('creates rendered notes, reports success, and closes', async () => {
-			const {fillForm, button, vault, modal} = setup({folders: ['Podcasts']});
+			const {fillForm, button, vault, modal} = await setup({folders: ['Podcasts']});
 			await fillForm(undefined, undefined, 'Podcasts');
 			button('Import').click();
 			await vi.waitFor(() => expect(isOpen(modal)).toBe(false));
@@ -260,7 +262,7 @@ describe('OpmlImportModal', () => {
 		});
 
 		it('creates a missing destination folder first', async () => {
-			const {fillForm, modal, vault} = setup();
+			const {fillForm, modal, vault} = await setup();
 			await fillForm(undefined, undefined, 'New/Shows');
 			await modal.runImport();
 			expect(vault.createFolder.mock.calls.map(([p]) => p)).toEqual(['New', 'New/Shows']);
@@ -268,7 +270,7 @@ describe('OpmlImportModal', () => {
 		});
 
 		it('never overwrites existing notes', async () => {
-			const {fillForm, modal, vault} = setup({files: {'Connected.md': 'mine'}});
+			const {fillForm, modal, vault} = await setup({files: {'Connected.md': 'mine'}});
 			await fillForm();
 			await modal.runImport();
 			expect(vault.files.get('Connected.md')).toBe('mine');
@@ -277,7 +279,7 @@ describe('OpmlImportModal', () => {
 
 		it('reports per-note failures in the notice', async () => {
 			vi.spyOn(console, 'error').mockImplementation(() => {});
-			const {fillForm, modal, vault} = setup();
+			const {fillForm, modal, vault} = await setup();
 			await fillForm();
 			vault.create.mockRejectedValueOnce(new Error('nope'));
 			await modal.runImport();
@@ -286,7 +288,7 @@ describe('OpmlImportModal', () => {
 		});
 
 		it('uses singular wording for one note', async () => {
-			const {fillForm, modal} = setup({files: {'one.opml': '<opml><body><outline text="Solo"/></body></opml>'}});
+			const {fillForm, modal} = await setup({files: {'one.opml': '<opml><body><outline text="Solo"/></body></opml>'}});
 			await fillForm('one.opml');
 			await modal.runImport();
 			expect(notices).toEqual(['Imported 1 note.']);
@@ -294,7 +296,7 @@ describe('OpmlImportModal', () => {
 
 		it('keeps the modal open and shows the error when the import fails', async () => {
 			vi.spyOn(console, 'error').mockImplementation(() => {});
-			const {fillForm, modal, vault, errorEl, button} = setup();
+			const {fillForm, modal, vault, errorEl, button} = await setup();
 			await fillForm(undefined, undefined, 'New');
 			vault.createFolder.mockRejectedValueOnce(new Error('read-only vault'));
 			await modal.runImport();
@@ -306,7 +308,7 @@ describe('OpmlImportModal', () => {
 
 		it('clears a previous import error when the form changes', async () => {
 			vi.spyOn(console, 'error').mockImplementation(() => {});
-			const {fillForm, modal, vault, errorEl, isShown} = setup();
+			const {fillForm, modal, vault, errorEl, isShown} = await setup();
 			await fillForm(undefined, undefined, 'New');
 			vault.createFolder.mockRejectedValueOnce(new Error('read-only vault'));
 			await modal.runImport();
@@ -315,14 +317,14 @@ describe('OpmlImportModal', () => {
 		});
 
 		it('does nothing when the form is incomplete', async () => {
-			const {modal, vault} = setup();
+			const {modal, vault} = await setup();
 			await modal.runImport();
 			expect(vault.create).not.toHaveBeenCalled();
 			expect(isOpen(modal)).toBe(true);
 		});
 
 		it('ignores a second click while an import is running', async () => {
-			const {fillForm, modal, vault, button} = setup();
+			const {fillForm, modal, vault, button} = await setup();
 			await fillForm();
 			const first = modal.runImport();
 			expect(button('Import').disabled).toBe(true);

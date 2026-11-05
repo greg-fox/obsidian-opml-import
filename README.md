@@ -34,6 +34,14 @@ tags: [podcast]
 - Obsidian 1.4.0 or later.
 - Enable **Settings → Core plugins → Templates** and set a template folder, and/or install **Templater** and set its template folder.
 - At least one `.md` template must exist in those folders for the import command to list templates.
+- Template folders are read from the saved Templates and Templater settings each time the import dialog opens, so after changing a template folder, reopen the dialog.
+
+## Releasing
+
+1. Run `npm version <x.y.z>`. This updates `package.json`, syncs `manifest.json` and `versions.json`, commits, and creates a tag with no leading `v` (set by `.npmrc`).
+2. Push the commit and tag: `git push --follow-tags`. For the first release, the version is already 1.0.0, so tag it directly: `git tag 1.0.0 && git push origin 1.0.0`.
+3. The **Release Obsidian plugin** workflow runs lint, tests, and the build, then creates a draft GitHub release with `main.js`, `manifest.json`, and `styles.css` attached.
+4. Review the draft release and publish it.
 
 ## Development
 

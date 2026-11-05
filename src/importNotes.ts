@@ -46,16 +46,28 @@ export async function ensureFolder(app: App, folderPath: string): Promise<void> 
 /**
  * First free note path for `baseName` in `folderPath`: `Name.md`, then `Name 1.md`, `Name 2.md`, ...
  */
-export async function findAvailableNotePath(
+export function findAvailableNotePath(
 	folderPath: string,
 	baseName: string,
-	exists: (path: string) => Promise<boolean>,
-): Promise<string> {
+	isTaken: (path: string) => boolean,
+): string {
 	let candidate = joinVaultPath(folderPath, `${baseName}.md`);
-	for (let n = 1; await exists(candidate); n++) {
+	for (let n = 1; isTaken(candidate); n++) {
 		candidate = joinVaultPath(folderPath, `${baseName} ${n}.md`);
 	}
 	return candidate;
+}
+
+/**
+ * Tracks which vault paths are in use. Matching ignores case, because macOS and Windows
+ * file systems do, so `show.md` must not be created next to an existing `Show.md`.
+ */
+function createPathTracker(app: App): {isTaken: (path: string) => boolean; add: (path: string) => void} {
+	const taken = new Set(app.vault.getAllLoadedFiles().map((f) => f.path.toLowerCase()));
+	return {
+		isTaken: (path) => taken.has(path.toLowerCase()),
+		add: (path) => taken.add(path.toLowerCase()),
+	};
 }
 
 export interface ImportFailure {
@@ -79,14 +91,15 @@ export async function createNotesFromOutlines(
 	folderPath: string,
 ): Promise<ImportResult> {
 	const result: ImportResult = {created: [], failed: []};
-	const exists = (path: string) => app.vault.adapter.exists(path);
+	const paths = createPathTracker(app);
 
 	for (const outline of outlines) {
 		const name = generateFilenameFromOutline(outline);
 		try {
 			const content = buildNoteContentFromTemplate(templateContent, outline);
-			const path = await findAvailableNotePath(folderPath, name, exists);
+			const path = findAvailableNotePath(folderPath, name, paths.isTaken);
 			await app.vault.create(path, content);
+			paths.add(path);
 			result.created.push(path);
 		} catch (error) {
 			console.error(`OPML import: failed to create note "${name}"`, error);

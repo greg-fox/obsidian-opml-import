@@ -69,21 +69,21 @@ describe('ensureFolder', () => {
 });
 
 describe('findAvailableNotePath', () => {
-	const existsIn = (paths: string[]) => (p: string) => Promise.resolve(paths.includes(p));
+	const takenIn = (paths: string[]) => (p: string) => paths.includes(p);
 
-	it('uses the plain name when free', async () => {
-		expect(await findAvailableNotePath('F', 'Show', existsIn([]))).toBe('F/Show.md');
+	it('uses the plain name when free', () => {
+		expect(findAvailableNotePath('F', 'Show', takenIn([]))).toBe('F/Show.md');
 	});
 
-	it('adds an increasing number when the name is taken', async () => {
-		expect(await findAvailableNotePath('F', 'Show', existsIn(['F/Show.md']))).toBe('F/Show 1.md');
-		expect(await findAvailableNotePath('F', 'Show', existsIn(['F/Show.md', 'F/Show 1.md', 'F/Show 2.md']))).toBe(
+	it('adds an increasing number when the name is taken', () => {
+		expect(findAvailableNotePath('F', 'Show', takenIn(['F/Show.md']))).toBe('F/Show 1.md');
+		expect(findAvailableNotePath('F', 'Show', takenIn(['F/Show.md', 'F/Show 1.md', 'F/Show 2.md']))).toBe(
 			'F/Show 3.md',
 		);
 	});
 
-	it('works at the vault root', async () => {
-		expect(await findAvailableNotePath('', 'Show', existsIn(['Show.md']))).toBe('Show 1.md');
+	it('works at the vault root', () => {
+		expect(findAvailableNotePath('', 'Show', takenIn(['Show.md']))).toBe('Show 1.md');
 	});
 });
 
@@ -109,6 +109,12 @@ describe('createNotesFromOutlines', () => {
 		const result = await createNotesFromOutlines(asApp(vault.app), [{text: 'Show'}, {text: 'Show'}], '{{title}}', '');
 		expect(result.created).toEqual(['Show 1.md', 'Show 2.md']);
 		expect(vault.files.get('Show.md')).toBe('existing');
+	});
+
+	it('treats names that differ only by case as taken', async () => {
+		const vault = createFakeVault({files: {'Podcasts/show.md': 'existing'}});
+		const result = await createNotesFromOutlines(asApp(vault.app), [{text: 'Show'}], '{{title}}', 'Podcasts');
+		expect(result).toEqual({created: ['Podcasts/Show 1.md'], failed: []});
 	});
 
 	it('records a failure and continues with the remaining outlines', async () => {

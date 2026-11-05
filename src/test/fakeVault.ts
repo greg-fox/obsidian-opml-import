@@ -8,7 +8,12 @@ export interface FakeVaultOptions {
 	folders?: string[];
 	/** Core Templates folder; `null` disables the core plugin. Defaults to `Templates`. */
 	templatesFolder?: string | null;
+	/** Extra JSON files in the config folder, keyed by path relative to it (overrides the defaults). */
+	config?: Record<string, unknown>;
 }
+
+/** Deliberately not `.obsidian`: users can rename the config folder, and the code must follow `Vault#configDir`. */
+export const CONFIG_DIR = '.custom-config';
 
 export interface FakeVault {
 	app: App;
@@ -18,6 +23,8 @@ export interface FakeVault {
 	create: ReturnType<typeof vi.fn<(path: string, data: string) => Promise<TFile>>>;
 	createFolder: ReturnType<typeof vi.fn<(path: string) => Promise<TFolder>>>;
 }
+
+const CORE_TEMPLATES = 'templates';
 
 function makeFile(path: string): TFile {
 	const file = new TFile();
@@ -58,7 +65,9 @@ export function createFakeVault(options: FakeVaultOptions = {}): FakeVault {
 	const allFiles = () => [...files.keys()].sort().map(makeFile);
 
 	const create = vi.fn(async (path: string, data: string) => {
-		if (lookup(path)) throw new Error(`File already exists: ${path}`);
+		// Like macOS and Windows, treat paths that differ only by case as the same file.
+		const clash = [...files.keys(), ...folders].some((p) => p.toLowerCase() === path.toLowerCase());
+		if (clash) throw new Error(`File already exists: ${path}`);
 		files.set(path, data);
 		return makeFile(path);
 	});
@@ -69,10 +78,19 @@ export function createFakeVault(options: FakeVaultOptions = {}): FakeVault {
 	});
 
 	const templatesFolder = options.templatesFolder === undefined ? 'Templates' : options.templatesFolder;
+	const config = new Map<string, string>(
+		Object.entries({
+			'core-plugins.json': {[CORE_TEMPLATES]: templatesFolder !== null},
+			'templates.json': {folder: templatesFolder ?? ''},
+			...options.config,
+		}).map(([path, value]) => [`${CONFIG_DIR}/${path}`, JSON.stringify(value)]),
+	);
 
 	const app: App = {
 		vault: {
+			configDir: CONFIG_DIR,
 			getAbstractFileByPath: lookup,
+			getAllLoadedFiles: () => [...[...folders].sort().map(makeFolder), ...allFiles()],
 			getFiles: allFiles,
 			getMarkdownFiles: () => allFiles().filter((f) => f.extension === 'md'),
 			read: async (file: TFile) => {
@@ -83,14 +101,10 @@ export function createFakeVault(options: FakeVaultOptions = {}): FakeVault {
 			create,
 			createFolder,
 			adapter: {
-				exists: async (path: string) => lookup(path) !== null,
-			},
-		},
-		internalPlugins: {
-			plugins: {
-				templates: {
-					enabled: templatesFolder !== null,
-					instance: {options: {folder: templatesFolder ?? ''}},
+				read: async (path: string) => {
+					const content = config.get(path);
+					if (content === undefined) throw new Error(`ENOENT: ${path}`);
+					return content;
 				},
 			},
 		},

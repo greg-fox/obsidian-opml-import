@@ -194,14 +194,14 @@ export class TFolder extends TAbstractFile {
 
 export type App = {
 	vault: {
+		configDir: string;
 		getAbstractFileByPath: (path: string) => TAbstractFile | null;
+		getAllLoadedFiles: () => TAbstractFile[];
 		getMarkdownFiles: () => TFile[];
 		getFiles: () => TFile[];
 		read: (file: TFile) => Promise<string>;
 		create: (path: string, data: string) => Promise<TFile>;
 		createFolder: (path: string) => Promise<TFolder>;
-		adapter: {exists: (path: string) => Promise<boolean>};
+		adapter: {read: (path: string) => Promise<string>};
 	};
-	internalPlugins?: {plugins?: unknown};
-	plugins?: {plugins?: Record<string, unknown>};
 };
