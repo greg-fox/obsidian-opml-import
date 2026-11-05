@@ -2,10 +2,10 @@
 	"id": "opml-import",
 	"name": "OPML Import",
 	"version": "1.0.0",
-	"minAppVersion": "0.15.0",
+	"minAppVersion": "1.4.0",
 	"description": "Import OPML files and create notes for each entry using customizable templates.",
-	"author": "",
-	"authorUrl": "",
+	"author": "Greg Fox",
+	"authorUrl": "https://gf-tech.com",
 	"fundingUrl": "",
 	"isDesktopOnly": false
 }

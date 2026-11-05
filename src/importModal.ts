@@ -1,298 +1,272 @@
-import {App, Modal, Notice, TFile, TFolder} from 'obsidian';
-import type { OpmlOutline } from './opmlTypes';
-import {buildNoteContentFromTemplate} from './buildNoteContent';
+import {App, ButtonComponent, Modal, Notice, Setting, TFile} from 'obsidian';
+import {collectImportableOutlines, generateFilenameFromOutline} from './opmlOutlines';
+import type {OpmlOutline} from './opmlTypes';
+import {parseOpml} from './parseOpml';
+import {
+	createNotesFromOutlines,
+	ensureFolder,
+	getFolderStatus,
+	normalizeFolderPath,
+	type FolderStatus,
+} from './importNotes';
 import {collectVaultTemplateFiles} from './vaultTemplateSources';
-import {generateFilenameFromOutline, getOutlinesFromParsed} from './opmlOutlines';
-import {parseOpmlString} from './parseOpml';
 
-export type { OpmlOutline };
+const OUTLINE_EXTENSIONS = ['opml', 'xml'];
+const PREVIEW_SAMPLE_SIZE = 5;
+
+function isOutlineFile(file: unknown): file is TFile {
+	return file instanceof TFile && OUTLINE_EXTENSIONS.includes(file.extension.toLowerCase());
+}
+
+function errorMessage(error: unknown): string {
+	return error instanceof Error ? error.message : String(error);
+}
 
 export class OpmlImportModal extends Modal {
-	selectedFile: TFile | null = null;
-	selectedTemplateFile: TFile | null = null;
-	selectedFolder: TFolder | null = null;
-	errorMessage: string = '';
+	outlineFile: TFile | null = null;
+	/** Rows from {@link outlineFile} that will become notes. */
+	outlines: OpmlOutline[] = [];
+	templateFile: TFile | null = null;
+	/** Normalized destination; `''` is the vault root. */
+	folderPath = '';
+
+	private outlineError = '';
+	private importError = '';
+	private importing = false;
+
+	private outlineInputEl: HTMLInputElement | null = null;
+	private previewEl: HTMLElement | null = null;
+	private errorEl: HTMLElement | null = null;
+	private importButton: ButtonComponent | null = null;
 
 	constructor(app: App) {
 		super(app);
 	}
 
-	onOpen() {
+	onOpen(): void {
 		const {contentEl} = this;
 		contentEl.empty();
+		this.modalEl.addClass('opml-import-modal');
+		this.setTitle('Import outlines');
 
-		contentEl.createEl('h2', {text: 'Import outlines'});
-
-		const vaultTemplates = collectVaultTemplateFiles(this.app);
-		if (vaultTemplates.length === 0) {
-			contentEl.createEl('div', {
-				cls: 'opml-import-error',
-				text: 'No vault templates found. Enable the core Templates plugin (Settings → Core plugins) and set a template folder, or install Templater and set its template folder. Add a Markdown file in that folder with placeholders such as {{title}} and {{text}}.',
-			});
-			contentEl.createEl('button', {text: 'Close', cls: 'mod-cta'}).addEventListener('click', () => this.close());
+		const templates = collectVaultTemplateFiles(this.app);
+		if (templates.length === 0) {
+			this.renderNoTemplates();
 			return;
 		}
 
-		// File selection
-		const fileSetting = contentEl.createDiv('opml-import-setting');
-		fileSetting.createEl('label', {text: 'Outline file', cls: 'opml-import-label'});
-		const fileInputContainer = fileSetting.createDiv('file-input-container');
-
-		const fileInput = fileInputContainer.createEl('input', {
-			type: 'text',
-			placeholder: 'Path in vault (e.g. folder/export.opml)',
-			cls: 'opml-import-input',
-		});
-		fileInput.value = this.selectedFile ? this.selectedFile.path : '';
-
-		const browseButton = fileInputContainer.createEl('button', {
-			text: 'Browse',
-			cls: 'mod-cta',
-		});
-
-		// Template selection (vault .md files from Core Templates / Templater folders)
-		const templateSetting = contentEl.createDiv('opml-import-setting');
-		templateSetting.createEl('label', {text: 'Template', cls: 'opml-import-label'});
-		const templateSelect = templateSetting.createEl('select', {cls: 'opml-import-select'});
-
-		const emptyOption = templateSelect.createEl('option', {text: 'Select a template...', value: ''});
-		emptyOption.selected = true;
-
-		const byGroup = new Map<string, typeof vaultTemplates>();
-		for (const opt of vaultTemplates) {
-			const list = byGroup.get(opt.groupLabel) ?? [];
-			list.push(opt);
-			byGroup.set(opt.groupLabel, list);
-		}
-		for (const [groupLabel, options] of byGroup) {
-			const og = templateSelect.createEl('optgroup', {attr: {label: groupLabel}});
-			for (const opt of options) {
-				const option = og.createEl('option', {
-					text: opt.file.basename,
-					value: opt.file.path,
+		new Setting(contentEl)
+			.setName('Outline file')
+			// eslint-disable-next-line obsidianmd/ui/sentence-case -- file extensions
+			.setDesc('Path to an .opml or .xml file in the vault.')
+			.addText((text) => {
+				text.setPlaceholder('Folder/export.opml');
+				this.outlineInputEl = text.inputEl;
+				text.inputEl.addEventListener('change', () => {
+					void this.selectOutlineFile(text.inputEl.value);
 				});
-				if (this.selectedTemplateFile && opt.file.path === this.selectedTemplateFile.path) {
-					option.selected = true;
-					emptyOption.selected = false;
+			})
+			.addButton((button) =>
+				button.setButtonText('Browse').onClick(() => {
+					void this.browseForOutlineFile();
+				}),
+			);
+
+		new Setting(contentEl)
+			.setName('Template')
+			// eslint-disable-next-line obsidianmd/ui/sentence-case -- plugin names
+			.setDesc('A note from your Templates or Templater folder.')
+			.addDropdown((dropdown) => {
+				dropdown.addOption('', 'Select a template...');
+				const groups = new Map<string, HTMLOptGroupElement>();
+				for (const {file, groupLabel} of templates) {
+					let group = groups.get(groupLabel);
+					if (!group) {
+						group = dropdown.selectEl.createEl('optgroup', {attr: {label: groupLabel}});
+						groups.set(groupLabel, group);
+					}
+					group.createEl('option', {text: file.basename, value: file.path});
 				}
-			}
-		}
+				dropdown.onChange((value) => this.selectTemplate(value));
+			});
 
-		// Folder selection
-		const folderSetting = contentEl.createDiv('opml-import-setting');
-		folderSetting.createEl('label', {text: 'Destination folder', cls: 'opml-import-label'});
-		const folderInputContainer = folderSetting.createDiv('folder-input-container');
+		new Setting(contentEl)
+			.setName('Destination folder')
+			.setDesc('Leave empty for the vault root. Missing folders are created.')
+			.addText((text) => {
+				text.setPlaceholder('Podcasts');
+				text.inputEl.addEventListener('change', () => this.setDestination(text.inputEl.value));
+			});
 
-		const folderInput = folderInputContainer.createEl('input', {
-			type: 'text',
-			placeholder: 'Enter folder path (leave empty for root)',
-			cls: 'opml-import-input',
-		});
-		folderInput.value = this.selectedFolder && this.selectedFolder.path !== '/' ? this.selectedFolder.path : '';
+		this.previewEl = contentEl.createDiv({cls: 'opml-import-preview'});
+		this.errorEl = contentEl.createDiv({cls: 'opml-import-error'});
 
-		if (!this.selectedFolder) {
-			this.selectedFolder = this.app.vault.getRoot();
-		}
+		new Setting(contentEl)
+			.addButton((button) => {
+				this.importButton = button;
+				button
+					.setButtonText('Import')
+					.setCta()
+					.onClick(() => {
+						void this.runImport();
+					});
+			})
+			.addButton((button) => button.setButtonText('Cancel').onClick(() => this.close()));
 
-		const errorDiv = contentEl.createDiv('opml-import-error');
-		errorDiv.toggleVisibility(!!this.errorMessage);
-		errorDiv.textContent = this.errorMessage;
-
-		const buttonContainer = contentEl.createDiv('opml-import-buttons');
-		const importButton = buttonContainer.createEl('button', {
-			text: 'Import',
-			cls: 'mod-cta',
-		});
-
-		const updateImportButton = () => {
-			const isValid =
-				this.selectedFile !== null &&
-				this.selectedTemplateFile !== null &&
-				this.selectedFolder !== null;
-			importButton.disabled = !isValid;
-		};
-
-		fileInput.onchange = () => {
-			const path = fileInput.value.trim();
-			if (path) {
-				const file = this.app.vault.getAbstractFileByPath(path);
-				if (file && file instanceof TFile && (file.extension === 'opml' || file.extension === 'xml')) {
-					this.selectedFile = file;
-					this.errorMessage = '';
-				} else {
-					this.selectedFile = null;
-					this.errorMessage = 'Invalid OPML file path';
-				}
-			} else {
-				this.selectedFile = null;
-				this.errorMessage = '';
-			}
-			this.updateErrorDisplay();
-			updateImportButton();
-		};
-
-		templateSelect.onchange = () => {
-			const p = templateSelect.value;
-			const f = p ? this.app.vault.getAbstractFileByPath(p) : null;
-			this.selectedTemplateFile = f instanceof TFile ? f : null;
-			this.errorMessage = '';
-			this.updateErrorDisplay();
-			updateImportButton();
-		};
-
-		folderInput.onchange = () => {
-			const path = folderInput.value.trim();
-			if (!path || path === '/') {
-				this.selectedFolder = this.app.vault.getRoot();
-				this.errorMessage = '';
-			} else {
-				const folder = this.app.vault.getAbstractFileByPath(path);
-				if (folder instanceof TFolder) {
-					this.selectedFolder = folder;
-					this.errorMessage = '';
-				} else {
-					this.selectedFolder = null;
-					this.errorMessage = 'Invalid folder path';
-				}
-			}
-			this.updateErrorDisplay();
-			updateImportButton();
-		};
-
-		browseButton.onclick = () => {
-			const files = this.app.vault.getFiles().filter((f) => f.extension === 'opml' || f.extension === 'xml');
-			if (files.length === 0) {
-				/* eslint-disable-next-line obsidianmd/ui/sentence-case -- OPML */
-				new Notice('No OPML files found in the vault');
-				return;
-			}
-			if (files.length === 1 && files[0]) {
-				this.selectedFile = files[0];
-				fileInput.value = files[0].path;
-				this.errorMessage = '';
-				this.updateErrorDisplay();
-				updateImportButton();
-			} else {
-				new Notice(`Found ${files.length} OPML files. Please enter the file path manually.`);
-			}
-		};
-
-		updateImportButton();
-
-		importButton.onclick = async () => {
-			await this.performImport();
-		};
-
-		const cancelButton = buttonContainer.createEl('button', {
-			text: 'Cancel',
-		});
-		cancelButton.onclick = () => {
-			this.close();
-		};
+		this.refresh();
 	}
 
-	private updateErrorDisplay(): void {
-		const errorDiv = this.contentEl.querySelector('.opml-import-error');
-		if (errorDiv instanceof HTMLElement) {
-			errorDiv.textContent = this.errorMessage;
-			errorDiv.toggleVisibility(!!this.errorMessage);
-		}
+	onClose(): void {
+		this.contentEl.empty();
 	}
 
-	private async performImport(): Promise<void> {
-		if (!this.selectedFile) {
-			this.errorMessage = 'Please select an OPML file';
-			this.updateErrorDisplay();
-			return;
-		}
+	/** Resolve a vault path, then read and parse it so the preview can show what will be created. */
+	async selectOutlineFile(rawPath: string): Promise<void> {
+		const path = rawPath.trim();
+		this.outlineFile = null;
+		this.outlines = [];
+		this.outlineError = '';
+		this.importError = '';
 
-		if (!this.selectedTemplateFile) {
-			this.errorMessage = 'Please select a template';
-			this.updateErrorDisplay();
-			return;
-		}
-
-		if (!this.selectedFolder) {
-			this.errorMessage = 'Please select a destination folder';
-			this.updateErrorDisplay();
-			return;
-		}
-
-		const destinationFolder = this.selectedFolder;
-		const templateFile = this.selectedTemplateFile;
-
-		try {
-			const opmlContent = await this.app.vault.read(this.selectedFile);
-			const outline = await parseOpmlString(opmlContent);
-
-			if (!outline) {
-				this.errorMessage = 'Invalid OPML file format';
-				this.updateErrorDisplay();
-				return;
-			}
-
-			const outlines = getOutlinesFromParsed(outline);
-
-			if (outlines.length === 0) {
-				this.errorMessage =
-					'No outline entries found in the OPML file. The file may be empty or use an unexpected structure.';
-				this.updateErrorDisplay();
-				return;
-			}
-
-			const templateContent = await this.app.vault.read(templateFile);
-
-			let successCount = 0;
-			let errorCount = 0;
-
-			for (const item of outlines) {
+		if (path !== '') {
+			const file = this.app.vault.getAbstractFileByPath(path);
+			if (isOutlineFile(file)) {
+				this.outlineFile = file;
 				try {
-					await this.createNoteFromOutline(item, templateContent, destinationFolder);
-					successCount++;
+					this.outlines = collectImportableOutlines(parseOpml(await this.app.vault.read(file)));
+					if (this.outlines.length === 0) {
+						this.outlineError = 'No outline entries found in this file.';
+					}
 				} catch (error) {
-					console.error('Error creating note:', error);
-					errorCount++;
+					this.outlineError = `Could not read the outline file: ${errorMessage(error)}`;
 				}
-			}
-
-			if (errorCount > 0) {
-				new Notice(`Import completed: ${successCount} notes created, ${errorCount} errors`);
 			} else {
-				new Notice(`Successfully imported ${successCount} notes`);
+				this.outlineError = 'No .opml or .xml file exists at that path.';
 			}
+		}
+		this.refresh();
+	}
 
+	selectTemplate(path: string): void {
+		const file = path ? this.app.vault.getAbstractFileByPath(path) : null;
+		this.templateFile = file instanceof TFile ? file : null;
+		this.importError = '';
+		this.refresh();
+	}
+
+	setDestination(rawPath: string): void {
+		this.folderPath = normalizeFolderPath(rawPath);
+		this.importError = '';
+		this.refresh();
+	}
+
+	private async browseForOutlineFile(): Promise<void> {
+		const files = this.app.vault.getFiles().filter(isOutlineFile);
+		const [only] = files;
+		if (files.length === 1 && only) {
+			if (this.outlineInputEl) this.outlineInputEl.value = only.path;
+			await this.selectOutlineFile(only.path);
+		} else if (files.length === 0) {
+			// eslint-disable-next-line obsidianmd/ui/sentence-case -- file extensions
+			new Notice('No .opml or .xml files found in the vault.');
+		} else {
+			new Notice(`Found ${files.length} outline files. Enter the path of the one to import.`);
+		}
+	}
+
+	private folderStatus(): FolderStatus {
+		return getFolderStatus(this.app, this.folderPath);
+	}
+
+	private canImport(): boolean {
+		return (
+			!this.importing &&
+			this.outlineFile !== null &&
+			this.outlines.length > 0 &&
+			this.templateFile !== null &&
+			this.folderStatus() !== 'not-a-folder'
+		);
+	}
+
+	/** Re-render the preview, error, and import button from current state. */
+	private refresh(): void {
+		const folderStatus = this.folderStatus();
+		const errors = [this.importError, this.outlineError];
+		if (folderStatus === 'not-a-folder') {
+			errors.push(`"${this.folderPath}" is a file, not a folder.`);
+		}
+		const error = errors.find((e) => e !== '') ?? '';
+
+		if (this.errorEl) {
+			this.errorEl.setText(error);
+			this.errorEl.toggle(error !== '');
+		}
+		if (this.previewEl) {
+			this.renderPreview(this.previewEl, folderStatus);
+		}
+		this.importButton?.setDisabled(!this.canImport());
+	}
+
+	private renderPreview(el: HTMLElement, folderStatus: FolderStatus): void {
+		el.empty();
+		const count = this.outlines.length;
+		el.toggle(count > 0);
+		if (count === 0) return;
+
+		const destination = this.folderPath === '' ? 'the vault root' : this.folderPath;
+		const notes = count === 1 ? '1 note' : `${count} notes`;
+		el.createEl('p', {text: `${notes} will be created in ${destination}.`});
+		if (folderStatus === 'missing') {
+			el.createEl('p', {text: `The folder ${this.folderPath} will be created.`});
+		}
+
+		const list = el.createEl('ul');
+		for (const outline of this.outlines.slice(0, PREVIEW_SAMPLE_SIZE)) {
+			list.createEl('li', {text: generateFilenameFromOutline(outline)});
+		}
+		if (count > PREVIEW_SAMPLE_SIZE) {
+			list.createEl('li', {text: `and ${count - PREVIEW_SAMPLE_SIZE} more`});
+		}
+	}
+
+	private renderNoTemplates(): void {
+		this.contentEl.createDiv({
+			cls: 'opml-import-error',
+			text: 'No templates found. Enable the core Templates plugin (Settings → Core plugins) and set a template folder, or install Templater and set its template folder. Then add a Markdown note to that folder using placeholders such as {{title}} and {{xmlUrl}}.',
+		});
+		new Setting(this.contentEl).addButton((button) =>
+			button
+				.setButtonText('Close')
+				.setCta()
+				.onClick(() => this.close()),
+		);
+	}
+
+	async runImport(): Promise<void> {
+		const {templateFile, outlines, folderPath} = this;
+		if (!this.canImport() || !templateFile) return;
+
+		this.importing = true;
+		this.importError = '';
+		this.refresh();
+		try {
+			await ensureFolder(this.app, folderPath);
+			const templateContent = await this.app.vault.read(templateFile);
+			const {created, failed} = await createNotesFromOutlines(this.app, outlines, templateContent, folderPath);
+
+			const createdText = created.length === 1 ? '1 note' : `${created.length} notes`;
+			new Notice(
+				failed.length > 0
+					? `Imported ${createdText}. ${failed.length} failed; see the developer console for details.`
+					: `Imported ${createdText}.`,
+			);
 			this.close();
 		} catch (error) {
-			console.error('Import error:', error);
-			this.errorMessage = `Error importing OPML: ${error instanceof Error ? error.message : String(error)}`;
-			this.updateErrorDisplay();
+			console.error('OPML import failed', error);
+			this.importError = `Import failed: ${errorMessage(error)}`;
+		} finally {
+			this.importing = false;
+			this.refresh();
 		}
-	}
-
-	private async createNoteFromOutline(
-		outline: OpmlOutline,
-		templateContent: string,
-		folder: TFolder,
-	): Promise<void> {
-		const content = buildNoteContentFromTemplate(templateContent, outline);
-
-		const filename = generateFilenameFromOutline(outline);
-		const filePath = folder.path === '/' ? `${filename}.md` : `${folder.path}/${filename}.md`;
-
-		let finalPath = filePath;
-		let counter = 1;
-		while (await this.app.vault.adapter.exists(finalPath)) {
-			const baseName = filename + (counter > 1 ? `-${counter - 1}` : '');
-			finalPath =
-				folder.path === '/' ? `${baseName}-${counter}.md` : `${folder.path}/${baseName}-${counter}.md`;
-			counter++;
-		}
-
-		await this.app.vault.create(finalPath, content);
-	}
-
-	onClose() {
-		const {contentEl} = this;
-		contentEl.empty();
 	}
 }

@@ -11,7 +11,8 @@ export default defineConfig({
 		},
 	},
 	test: {
-		environment: 'node',
+		environment: 'happy-dom',
+		setupFiles: ['src/test/setup.ts'],
 		include: ['src/**/*.test.ts'],
 		coverage: {
 			provider: 'v8',
@@ -23,7 +24,6 @@ export default defineConfig({
 				'src/types/**',
 				'src/test/**',
 				'src/opmlTypes.ts',
-				'src/importModal.ts',
 			],
 			thresholds: {
 				lines: 90,

@@ -62,7 +62,15 @@ export class OpmlImportSettingTab extends PluginSettingTab {
 			cls: "opml-import-code-block",
 		});
 		containerEl.createEl("p", {
-			text: "Templater commands (`<% ... %>`) are not executed during import — only the placeholders above are substituted.",
+			text: "In frontmatter, values are written as quoted YAML strings, so URLs and titles with colons stay intact. In the note body, values are inserted as-is.",
+			cls: "setting-item-description",
+		});
+		containerEl.createEl("p", {
+			text: "3. Run the import. Outlines that only group other outlines (such as a category folder) are skipped, and each remaining entry becomes a note. Existing notes are never overwritten: a number is added to the new note's name instead. The destination folder is created if it does not exist.",
+			cls: "setting-item-description",
+		});
+		containerEl.createEl("p", {
+			text: "Templater commands (`<% ... %>`) are not executed during import; only the placeholders above are substituted.",
 			cls: "setting-item-description",
 		});
 		/* eslint-enable obsidianmd/ui/sentence-case */

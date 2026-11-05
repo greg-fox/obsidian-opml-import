@@ -1,62 +1,42 @@
-/*
+/* OPML Import */
 
-This CSS file will be included with your plugin, and
-available in the app when your plugin is enabled.
-
-If your plugin does not need CSS, delete this file.
-
-*/
-
-.opml-import-setting {
-	margin-bottom: 1.5em;
-}
-
-.opml-import-label {
-	display: block;
-	margin-bottom: 0.5em;
-	font-weight: 600;
-}
-
-.opml-import-input {
-	width: 100%;
-	padding: 0.5em;
-	margin-bottom: 0.5em;
-}
-
-.file-input-container,
-.folder-input-container {
-	display: flex;
-	gap: 0.5em;
-	align-items: center;
-}
-
-.file-input-container input,
-.folder-input-container input {
+.opml-import-modal .setting-item-control input[type="text"] {
 	flex: 1;
+	min-width: 12em;
+}
+
+.opml-import-preview {
+	padding: var(--size-4-2) var(--size-4-3);
+	margin-bottom: var(--size-4-3);
+	border-radius: var(--radius-s);
+	background-color: var(--background-secondary);
+	font-size: var(--font-ui-small);
+}
+
+.opml-import-preview p {
+	margin: 0 0 var(--size-4-1);
+}
+
+.opml-import-preview ul {
+	margin: 0;
+	color: var(--text-muted);
 }
 
 .opml-import-error {
+	padding: var(--size-4-2) var(--size-4-3);
+	margin-bottom: var(--size-4-3);
+	border-radius: var(--radius-s);
+	border: 1px solid var(--background-modifier-error);
 	color: var(--text-error);
-	background-color: var(--background-modifier-error);
-	padding: 0.75em;
-	border-radius: 4px;
-	margin-bottom: 1em;
-}
-
-.opml-import-buttons {
-	display: flex;
-	gap: 0.5em;
-	justify-content: flex-end;
-	margin-top: 1.5em;
 }
 
 .opml-import-code-block {
 	display: block;
-	padding: 0.75em 1em;
-	margin: 0.5em 0;
-	font-size: 0.9em;
+	padding: var(--size-4-3) var(--size-4-4);
+	margin: var(--size-4-2) 0;
+	font-size: var(--font-ui-small);
 	background-color: var(--background-secondary);
-	border-radius: 4px;
+	border-radius: var(--radius-s);
 	overflow-x: auto;
 	white-space: pre-wrap;
 }

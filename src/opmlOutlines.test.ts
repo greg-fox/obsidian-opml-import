@@ -1,74 +1,76 @@
 import {describe, expect, it} from 'vitest';
 import type {OpmlOutline} from './opmlTypes';
-import {flattenOutlines, generateFilenameFromOutline, getOutlinesFromParsed} from './opmlOutlines';
+import {collectImportableOutlines, generateFilenameFromOutline} from './opmlOutlines';
 
-describe('getOutlinesFromParsed', () => {
-	it('returns empty array when no opml.body', () => {
-		expect(getOutlinesFromParsed({})).toEqual([]);
-		expect(getOutlinesFromParsed({opml: {}})).toEqual([]);
+const names = (outlines: OpmlOutline[]) => outlines.map((o) => o.text);
+
+describe('collectImportableOutlines', () => {
+	it('returns leaf outlines in document order', () => {
+		expect(names(collectImportableOutlines([{text: 'A'}, {text: 'B'}]))).toEqual(['A', 'B']);
 	});
 
-	it('collects subs from opml package shape', () => {
-		const parsed = {
-			opml: {
-				body: {
-					subs: [{text: 'A', xmlUrl: 'http://a'}, {text: 'B'}],
-				},
-			},
-		};
-		const rows = getOutlinesFromParsed(parsed);
-		expect(rows).toHaveLength(2);
-		expect(rows[0]?.text).toBe('A');
-		expect(rows[1]?.text).toBe('B');
+	it('skips container outlines but keeps their children', () => {
+		const outlines: OpmlOutline[] = [
+			{text: 'feeds', children: [{text: 'A', xmlUrl: 'http://a'}, {text: 'B', xmlUrl: 'http://b'}]},
+		];
+		expect(names(collectImportableOutlines(outlines))).toEqual(['A', 'B']);
 	});
 
-	it('handles body with text but no subs', () => {
-		const parsed = {
-			opml: {
-				body: {text: 'Only', title: 'T'},
-			},
-		};
-		expect(getOutlinesFromParsed(parsed)).toEqual([{text: 'Only', title: 'T'}]);
+	it('walks nested containers', () => {
+		const outlines: OpmlOutline[] = [
+			{text: 'Tech', children: [{text: 'Apple', children: [{text: 'Leaf'}]}, {text: 'Other'}]},
+		];
+		expect(names(collectImportableOutlines(outlines))).toEqual(['Leaf', 'Other']);
 	});
 
-	it('ignores empty body object', () => {
-		expect(getOutlinesFromParsed({opml: {body: {}}})).toEqual([]);
-	});
-});
-
-describe('flattenOutlines', () => {
-	it('includes node and nested subs', () => {
-		const root: OpmlOutline = {
-			text: 'root',
-			subs: [{text: 'child'}],
-		};
-		const flat = flattenOutlines(root);
-		expect(flat.map((o) => o.text)).toEqual(['root', 'child']);
+	it('keeps an outline with an xmlUrl even when it has children', () => {
+		const outlines: OpmlOutline[] = [{text: 'Feed', xmlUrl: 'http://f', children: [{text: 'Episode'}]}];
+		expect(names(collectImportableOutlines(outlines))).toEqual(['Feed', 'Episode']);
 	});
 
-	it('uses outline when subs missing', () => {
-		const root: OpmlOutline = {
-			text: 'root',
-			outline: [{text: 'legacy'}],
-		};
-		expect(flattenOutlines(root).map((o) => o.text)).toEqual(['root', 'legacy']);
+	it('keeps leaves identified only by title, xmlUrl, or htmlUrl', () => {
+		const outlines: OpmlOutline[] = [{title: 'T'}, {xmlUrl: 'http://x'}, {htmlUrl: 'http://h'}];
+		expect(collectImportableOutlines(outlines)).toHaveLength(3);
 	});
 
-	it('skips nodes with no text, title, or xmlUrl', () => {
-		const root: OpmlOutline = {
-			subs: [{text: 'leaf'}],
-		};
-		expect(flattenOutlines(root).map((o) => o.text)).toEqual(['leaf']);
+	it('skips leaves with no content', () => {
+		expect(collectImportableOutlines([{type: 'rss'}, {}])).toEqual([]);
+	});
+
+	it('returns an empty list for no outlines', () => {
+		expect(collectImportableOutlines([])).toEqual([]);
 	});
 });
 
 describe('generateFilenameFromOutline', () => {
-	it('uses title and sanitizes', () => {
-		expect(generateFilenameFromOutline({title: 'Hello: World'})).toBe('Hello World');
+	it('prefers title over text', () => {
+		expect(generateFilenameFromOutline({title: 'Title', text: 'Text'})).toBe('Title');
+		expect(generateFilenameFromOutline({text: 'Text'})).toBe('Text');
 	});
 
-	it('falls back to text then Untitled', () => {
-		expect(generateFilenameFromOutline({text: 'x'})).toBe('x');
+	it('removes characters that are invalid in file names', () => {
+		expect(generateFilenameFromOutline({title: 'a\\b/c:d*e?f"g<h>i|j'})).toBe('abcdefghij');
+	});
+
+	it('removes characters that break links, block refs, and headings', () => {
+		expect(generateFilenameFromOutline({title: '[[Show]] #1 ^ref'})).toBe('Show 1 ref');
+	});
+
+	it('removes leading dots so the note is not hidden', () => {
+		expect(generateFilenameFromOutline({title: '...dot show'})).toBe('dot show');
+	});
+
+	it('collapses whitespace and trims', () => {
+		expect(generateFilenameFromOutline({title: '  A \n\t B  '})).toBe('A B');
+	});
+
+	it('truncates to 100 characters', () => {
+		expect(generateFilenameFromOutline({title: 'x'.repeat(150)})).toHaveLength(100);
+	});
+
+	it('falls back to Untitled when nothing usable remains', () => {
 		expect(generateFilenameFromOutline({})).toBe('Untitled');
+		expect(generateFilenameFromOutline({title: '???'})).toBe('Untitled');
+		expect(generateFilenameFromOutline({title: '...'})).toBe('Untitled');
 	});
 });
