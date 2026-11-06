@@ -72,7 +72,8 @@ export function createFakeVault(options: FakeVaultOptions = {}): FakeVault {
 		return makeFile(path);
 	});
 	const createFolder = vi.fn(async (path: string) => {
-		if (lookup(path)) throw new Error(`Folder already exists: ${path}`);
+		const clash = [...files.keys(), ...folders].some((p) => p.toLowerCase() === path.toLowerCase());
+		if (clash) throw new Error(`Folder already exists: ${path}`);
 		folders.add(path);
 		return makeFolder(path);
 	});

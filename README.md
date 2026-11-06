@@ -2,25 +2,30 @@
 
 Import [OPML](https://opml.org/spec2.opml) outlines into Markdown notes in your [Obsidian](https://obsidian.md) vault.
 
+![The Import outlines dialog with an outline file, template, and destination folder selected, previewing the notes to be created](docs/import-dialog.png)
+
 ## Features
 
 - **Settings → Community plugins → OPML Import → Import from OPML**, or the command **Import outlines from OPML**: choose an OPML/XML file in the vault, a **template** (Markdown note from your [Templates](https://help.obsidian.md/Plugins/Templates) folder and/or [Templater](https://github.com/SilentVoid13/Templater) template folder), and a destination folder.
 - Before importing, the dialog previews how many notes will be created, where, and the first few note names.
 - Each outline entry becomes a note. Outlines that only group other outlines (for example, the `feeds` folder in an Overcast export or a category folder in a feed reader export) are skipped. An outline with an `xmlUrl` is always imported.
-- Placeholders in the template are replaced: `{{title}}`, `{{text}}`, `{{xmlUrl}}`, `{{htmlUrl}}`, `{{type}}`, `{{created}}`, `{{category}}`. `{{title}}` falls back to `text` and `{{text}}` falls back to `title`.
+- Placeholders in the template are replaced: `{{title}}`, `{{text}}`, `{{xmlUrl}}`, `{{htmlUrl}}`, `{{type}}`, `{{created}}`, `{{category}}`. `{{title}}` falls back to `text` and `{{text}}` falls back to `title`. Spaces inside the braces are allowed: `{{ xmlUrl }}` works the same as `{{xmlUrl}}`.
+- The core Templates date placeholders work too: `{{date}}` and `{{time}}` use the date and time formats from **Settings → Templates**, and `{{date:YYYY-MM-DD}}` or `{{time:HH:mm}}` set a format inline. Every note in one import gets the same timestamp.
 - YAML frontmatter in the template is supported. Values are written as quoted YAML strings, so URLs and titles containing `:`, `#`, or quotes are kept intact. Values inside existing quotes or flow lists (`[a, {{type}}]`) are escaped for that context, and values inside `|` / `>` block scalars are inserted as-is.
-- Existing notes are never overwritten. When a name is taken, a number is added: `Show.md`, `Show 1.md`, `Show 2.md`.
+- Existing notes are never overwritten. When a name is taken (ignoring case), a number is added: `Show.md`, `Show 1.md`, `Show 2.md`.
+- Note names are safe on every platform: characters that break file names or links are removed, and Windows device names such as `CON` or `NUL` get an underscore (`CON_`).
 - The destination folder, including any missing parent folders, is created if it does not exist.
 - Works on desktop and mobile. OPML is parsed with the built-in `DOMParser`, so the plugin has no runtime dependencies.
-- **Templater** `<% ... %>` snippets are **not** run during import; only the placeholders above are substituted. Use a normal Markdown template for imports.
+- **Templater** `<% ... %>` snippets are **not** run during import; only the placeholders above are substituted. The import dialog warns when the selected template contains them. Use a normal Markdown template for imports.
 
 ### Example template
 
 ```markdown
 ---
-title: {{title}}
-feed: {{xmlUrl}}
-website: {{htmlUrl}}
+title: "{{title}}"
+feed: "{{xmlUrl}}"
+imported: "{{date}}"
+website: "{{htmlUrl}}"
 tags: [podcast]
 ---
 
@@ -28,6 +33,8 @@ tags: [podcast]
 
 [Website]({{htmlUrl}})
 ```
+
+Put quotes around placeholders in the template's frontmatter, as above. Without quotes, `{{xmlUrl}}` is not valid YAML, and if you edit the template in the **Properties** view, Obsidian rewrites the line (for example, `url: {{xmlUrl}}` becomes `url:` followed by `"{ xmlUrl }":`) and the placeholder stops working. Quoted placeholders are filled and escaped correctly. Unquoted placeholders also work, as long as you edit the template in Source mode.
 
 ## Requirements
 

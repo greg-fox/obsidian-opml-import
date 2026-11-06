@@ -1,4 +1,5 @@
 import {normalizePath, TFolder, type App, type TFile} from 'obsidian';
+import {DEFAULT_DATE_FORMAT, DEFAULT_TIME_FORMAT} from './opmlPlaceholders';
 
 export type TemplateSourceKind = 'core-templates' | 'templater';
 
@@ -58,6 +59,15 @@ async function isCommunityPluginEnabled(app: App, id: string): Promise<boolean> 
 async function getCoreTemplatesFolder(app: App): Promise<string | null> {
 	if (!(await isCoreTemplatesEnabled(app))) return null;
 	return nonEmptyString(asRecord(await readConfigJson(app, 'templates.json')).folder);
+}
+
+/** Date and time formats configured for the core Templates plugin, or the plugin defaults. */
+export async function getCoreTemplateFormats(app: App): Promise<{dateFormat: string; timeFormat: string}> {
+	const config = asRecord(await readConfigJson(app, 'templates.json'));
+	return {
+		dateFormat: nonEmptyString(config.dateFormat) ?? DEFAULT_DATE_FORMAT,
+		timeFormat: nonEmptyString(config.timeFormat) ?? DEFAULT_TIME_FORMAT,
+	};
 }
 
 async function getTemplaterFolder(app: App): Promise<string | null> {

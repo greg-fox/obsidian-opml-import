@@ -1,5 +1,20 @@
 # Changelog
 
+## 2026-11-06 (store readiness)
+
+- **Added:** `{{date}}`, `{{time}}`, `{{date:FORMAT}}`, and `{{time:FORMAT}}` placeholders, matching the core Templates plugin. Default formats come from the core Templates settings; all notes in one import share a timestamp.
+- **Added:** The import dialog warns when the selected template contains Templater commands (`<% %>`), which are not run during import.
+- **Added:** The settings tab implements `getSettingDefinitions()`, so its rows appear in Obsidian's settings search on 1.13.0 and later. `display()` remains as the fallback for older versions, built from the same rows.
+- **Fixed:** Windows device names (`CON`, `PRN`, `AUX`, `NUL`, `COM1`-`COM9`, `LPT1`-`LPT9`, with or without an extension) get an underscore so the note can be created on Windows.
+- **Fixed:** Placeholders written with spaces inside the braces (`{{ xmlUrl }}`) were left in the note unchanged. In frontmatter, Obsidian then rewrote the leftover text as a nested property (`url:` followed by `"{ xmlUrl }":`). Spaces are now allowed.
+- **Changed:** The README example template quotes its frontmatter placeholders, with a note on why: unquoted placeholders are not valid YAML, so the Properties view rewrites them.
+- **Fixed:** A destination folder that differs only in case from an existing folder (`Podcasts` when the vault has `podcasts`) made the import fail with "Folder already exists" on macOS and Windows. The destination now uses the existing folder's casing.
+- **Fixed:** The import dialog sets its title with `titleEl` instead of `Modal.setTitle()`, which is not in the 1.4.x API, so `minAppVersion` 1.4.0 is accurate. Verified by type-checking against the Obsidian 1.4.0 typings.
+- **Fixed:** `version-bump.mjs` always records the new version in `versions.json`. Previously it skipped the entry when `minAppVersion` was unchanged, which made the release workflow fail.
+- Upgraded `eslint-plugin-obsidianmd` to 0.5.0 and the `obsidian` typings to 1.14.4; removed the `eslint-disable` comments the new rules forbid and added `eslint.config.mts` to the ESLint project service.
+- `tsconfig.json` now targets the ES2019 library (`trimStart` / `trimEnd`).
+- Added a screenshot of the import dialog to the README.
+
 ## 2026-11-05 (store preparation)
 
 - **Changed:** Template folders are now read from the saved settings of the core Templates plugin and Templater (`core-plugins.json`, `templates.json`, `community-plugins.json`, and Templater's `data.json` in the vault's config folder) instead of through undocumented `app.internalPlugins` / `app.plugins` objects. The config folder comes from `Vault#configDir`, so renamed config folders work.

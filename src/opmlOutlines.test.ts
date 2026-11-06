@@ -68,6 +68,24 @@ describe('generateFilenameFromOutline', () => {
 		expect(generateFilenameFromOutline({title: 'x'.repeat(150)})).toHaveLength(100);
 	});
 
+	it('keeps a trailing dot, which is valid before the .md extension', () => {
+		expect(generateFilenameFromOutline({title: 'Acme Inc.'})).toBe('Acme Inc.');
+	});
+
+	it('renames Windows reserved device names', () => {
+		expect(generateFilenameFromOutline({title: 'CON'})).toBe('CON_');
+		expect(generateFilenameFromOutline({title: 'nul'})).toBe('nul_');
+		expect(generateFilenameFromOutline({title: 'Com1'})).toBe('Com1_');
+		expect(generateFilenameFromOutline({title: 'LPT9'})).toBe('LPT9_');
+		expect(generateFilenameFromOutline({title: 'aux.tar.gz'})).toBe('aux_.tar.gz');
+	});
+
+	it('leaves names that only start with a reserved name alone', () => {
+		expect(generateFilenameFromOutline({title: 'Connected'})).toBe('Connected');
+		expect(generateFilenameFromOutline({title: 'Aux Cable Show'})).toBe('Aux Cable Show');
+		expect(generateFilenameFromOutline({title: 'COM10'})).toBe('COM10');
+	});
+
 	it('falls back to Untitled when nothing usable remains', () => {
 		expect(generateFilenameFromOutline({})).toBe('Untitled');
 		expect(generateFilenameFromOutline({title: '???'})).toBe('Untitled');

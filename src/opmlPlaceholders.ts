@@ -1,9 +1,38 @@
+import {moment} from 'obsidian';
 import type {OpmlOutline} from './opmlTypes';
 
 export const PLACEHOLDER_KEYS = ['title', 'text', 'xmlUrl', 'htmlUrl', 'type', 'created', 'category'] as const;
 export type PlaceholderKey = (typeof PLACEHOLDER_KEYS)[number];
 
-const PLACEHOLDER_PATTERN = new RegExp(`\\{\\{(${PLACEHOLDER_KEYS.join('|')})\\}\\}`, 'g');
+/** Defaults used by the core Templates plugin when no format is configured. */
+export const DEFAULT_DATE_FORMAT = 'YYYY-MM-DD';
+export const DEFAULT_TIME_FORMAT = 'HH:mm';
+
+/** Values that are the same for every note in one import. */
+export interface PlaceholderContext {
+	/** Moment used for `{{date}}` and `{{time}}`, captured once per import. */
+	now: ReturnType<typeof moment>;
+	dateFormat: string;
+	timeFormat: string;
+}
+
+export function createPlaceholderContext(options: Partial<PlaceholderContext> = {}): PlaceholderContext {
+	return {
+		now: options.now ?? moment(),
+		dateFormat: options.dateFormat || DEFAULT_DATE_FORMAT,
+		timeFormat: options.timeFormat || DEFAULT_TIME_FORMAT,
+	};
+}
+
+/**
+ * Matches outline placeholders (`{{title}}`) and the core Templates date placeholders
+ * (`{{date}}`, `{{time}}`, `{{date:YYYY-MM-DD}}`, `{{time:HH:mm}}`).
+ * Spaces inside the braces are allowed: `{{ xmlUrl }}`, `{{ date : YYYY }}`.
+ */
+const PLACEHOLDER_PATTERN = new RegExp(
+	`\\{\\{\\s*(?:(${PLACEHOLDER_KEYS.join('|')})|(date|time)(?:\\s*:([^{}]*))?)\\s*\\}\\}`,
+	'g',
+);
 
 /** Placeholder values for an outline. `title` and `text` fall back to each other. */
 export function getPlaceholderValues(outline: OpmlOutline): Record<PlaceholderKey, string> {
@@ -18,16 +47,27 @@ export function getPlaceholderValues(outline: OpmlOutline): Record<PlaceholderKe
 	};
 }
 
+type Resolve = (key: PlaceholderKey | undefined, dateKind: 'date' | 'time' | undefined, format: string | undefined) => string;
+
+function createResolver(outline: OpmlOutline, context: PlaceholderContext): Resolve {
+	const values = getPlaceholderValues(outline);
+	return (key, dateKind, format) => {
+		if (key) return values[key];
+		const fallback = dateKind === 'time' ? context.timeFormat : context.dateFormat;
+		return context.now.format(format?.trim() || fallback);
+	};
+}
+
 /**
  * Replace placeholders in a single pass, so substituted values are never re-scanned
  * (an outline titled `{{xmlUrl}}` stays literal).
  */
-function replacePlaceholders(
-	template: string,
-	values: Record<PlaceholderKey, string>,
-	encode: (value: string) => string,
-): string {
-	return template.replace(PLACEHOLDER_PATTERN, (_match, key: PlaceholderKey) => encode(values[key]));
+function replacePlaceholders(template: string, resolve: Resolve, encode: (value: string) => string): string {
+	return template.replace(
+		PLACEHOLDER_PATTERN,
+		(_match, key: PlaceholderKey | undefined, dateKind: 'date' | 'time' | undefined, format: string | undefined) =>
+			encode(resolve(key, dateKind, format)),
+	);
 }
 
 function hasPlaceholder(text: string): boolean {
@@ -36,8 +76,12 @@ function hasPlaceholder(text: string): boolean {
 }
 
 /** Markdown body: values are inserted as-is. */
-export function applyBodyPlaceholders(template: string, outline: OpmlOutline): string {
-	return replacePlaceholders(template, getPlaceholderValues(outline), (v) => v);
+export function applyBodyPlaceholders(
+	template: string,
+	outline: OpmlOutline,
+	context: PlaceholderContext = createPlaceholderContext(),
+): string {
+	return replacePlaceholders(template, createResolver(outline, context), (v) => v);
 }
 
 const LINE_PATTERN = /^(\s*(?:-\s+)?(?:[^\s#'"{}[\]:-][^:]*?:(?:\s+|$))?)(.*)$/;
@@ -57,8 +101,12 @@ const escapeSingleQuoted = (v: string): string => collapseNewlines(v).replace(/'
  * - `key: [{{x}}, {{y}}]` quotes each item.
  * - Lines inside a `|` or `>` block scalar are inserted as-is, with newlines collapsed.
  */
-export function applyFrontmatterPlaceholders(frontmatter: string, outline: OpmlOutline): string {
-	const values = getPlaceholderValues(outline);
+export function applyFrontmatterPlaceholders(
+	frontmatter: string,
+	outline: OpmlOutline,
+	context: PlaceholderContext = createPlaceholderContext(),
+): string {
+	const resolve = createResolver(outline, context);
 	let blockParentIndent: number | null = null;
 
 	return frontmatter
@@ -67,7 +115,7 @@ export function applyFrontmatterPlaceholders(frontmatter: string, outline: OpmlO
 			const indent = line.length - line.trimStart().length;
 			if (blockParentIndent !== null) {
 				if (line.trim() === '' || indent > blockParentIndent) {
-					return replacePlaceholders(line, values, collapseNewlines);
+					return replacePlaceholders(line, resolve, collapseNewlines);
 				}
 				blockParentIndent = null;
 			}
@@ -82,29 +130,36 @@ export function applyFrontmatterPlaceholders(frontmatter: string, outline: OpmlO
 			}
 			if (!hasPlaceholder(value)) return line;
 
-			return prefix + renderYamlValue(value.trimEnd(), values);
+			return prefix + renderYamlValue(value.trimEnd(), resolve);
 		})
 		.join('\n');
 }
 
-function renderYamlValue(value: string, values: Record<PlaceholderKey, string>): string {
-	if (value.startsWith('"')) return replacePlaceholders(value, values, escapeDoubleQuoted);
-	if (value.startsWith("'")) return replacePlaceholders(value, values, escapeSingleQuoted);
-	if (value.startsWith('[')) return replacePlaceholders(value, values, (v) => JSON.stringify(v));
+function renderYamlValue(value: string, resolve: Resolve): string {
+	if (value.startsWith('"')) return replacePlaceholders(value, resolve, escapeDoubleQuoted);
+	if (value.startsWith("'")) return replacePlaceholders(value, resolve, escapeSingleQuoted);
+	if (value.startsWith('[')) return replacePlaceholders(value, resolve, (v) => JSON.stringify(v));
 
 	// Plain scalar: keep a trailing ` # comment`, quote everything before it.
 	const commentAt = value.search(/\s#/);
 	const content = commentAt === -1 ? value : value.slice(0, commentAt);
 	const comment = commentAt === -1 ? '' : value.slice(commentAt);
 	if (!hasPlaceholder(content)) return value;
-	const rendered = replacePlaceholders(content, values, collapseNewlines).trim();
+	const rendered = replacePlaceholders(content, resolve, collapseNewlines).trim();
 	return JSON.stringify(rendered) + comment;
 }
 
 /**
- * Replace `{{title}}`, `{{text}}`, etc. with values from an OPML outline.
+ * Replace `{{title}}`, `{{text}}`, `{{date}}`, etc. with values from an OPML outline.
  * When `forYaml` is true the template is treated as frontmatter and values are YAML-encoded.
  */
-export function applyOpmlPlaceholders(template: string, outline: OpmlOutline, forYaml: boolean): string {
-	return forYaml ? applyFrontmatterPlaceholders(template, outline) : applyBodyPlaceholders(template, outline);
+export function applyOpmlPlaceholders(
+	template: string,
+	outline: OpmlOutline,
+	forYaml: boolean,
+	context: PlaceholderContext = createPlaceholderContext(),
+): string {
+	return forYaml
+		? applyFrontmatterPlaceholders(template, outline, context)
+		: applyBodyPlaceholders(template, outline, context);
 }

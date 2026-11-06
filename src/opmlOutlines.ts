@@ -28,6 +28,11 @@ function hasContent(outline: OpmlOutline): boolean {
 /** Characters that are invalid in file names or that break wikilinks, block refs, or headings. */
 const UNSAFE_FILENAME_CHARS = /[\\/:*?"<>|#^[\]]/g;
 const MAX_FILENAME_LENGTH = 100;
+/**
+ * Device names Windows reserves. They are reserved with any extension too (`NUL.tar.gz` is `NUL`),
+ * so the match is the name followed by a dot or the end of the string.
+ */
+const WINDOWS_RESERVED_NAME = /^(con|prn|aux|nul|com[0-9¹²³]|lpt[0-9¹²³])(?=\.|$)/i;
 
 /** Note name (without extension) derived from an outline's title, then text. */
 export function generateFilenameFromOutline(outline: OpmlOutline): string {
@@ -38,5 +43,7 @@ export function generateFilenameFromOutline(outline: OpmlOutline): string {
 		.replace(/^\.+/, '')
 		.substring(0, MAX_FILENAME_LENGTH)
 		.trim();
-	return name || 'Untitled';
+	if (name === '') return 'Untitled';
+	// Windows cannot create files named after devices, so a vault synced there would break.
+	return name.replace(WINDOWS_RESERVED_NAME, '$1_');
 }

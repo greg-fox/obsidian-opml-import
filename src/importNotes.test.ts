@@ -6,6 +6,7 @@ import {
 	findAvailableNotePath,
 	getFolderStatus,
 	joinVaultPath,
+	matchExistingCase,
 	normalizeFolderPath,
 } from './importNotes';
 import {createFakeVault} from './test/fakeVault';
@@ -44,6 +45,31 @@ describe('getFolderStatus', () => {
 		expect(getFolderStatus(asApp(app), 'Notes')).toBe('exists');
 		expect(getFolderStatus(asApp(app), 'Missing')).toBe('missing');
 		expect(getFolderStatus(asApp(app), 'Notes/file.md')).toBe('not-a-folder');
+	});
+});
+
+describe('matchExistingCase', () => {
+	const {app} = createFakeVault({folders: ['podcasts/Shows'], files: {'Notes.md': ''}});
+
+	it('uses the casing of existing folders', () => {
+		expect(matchExistingCase(asApp(app), 'Podcasts')).toBe('podcasts');
+		expect(matchExistingCase(asApp(app), 'PODCASTS/shows')).toBe('podcasts/Shows');
+	});
+
+	it('keeps the given casing for parts that do not exist yet', () => {
+		expect(matchExistingCase(asApp(app), 'Podcasts/shows/New Folder')).toBe('podcasts/Shows/New Folder');
+		expect(matchExistingCase(asApp(app), 'Other/Sub')).toBe('Other/Sub');
+	});
+
+	it('leaves the vault root and exact matches unchanged', () => {
+		expect(matchExistingCase(asApp(app), '')).toBe('');
+		expect(matchExistingCase(asApp(app), 'podcasts')).toBe('podcasts');
+	});
+
+	it('matches a file with different casing, so it is reported as not a folder', () => {
+		const path = matchExistingCase(asApp(app), 'notes.md');
+		expect(path).toBe('Notes.md');
+		expect(getFolderStatus(asApp(app), path)).toBe('not-a-folder');
 	});
 });
 

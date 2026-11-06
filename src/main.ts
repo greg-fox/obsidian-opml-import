@@ -11,7 +11,6 @@ export default class OpmlImportPlugin extends Plugin {
 		// Add command to open import modal
 		this.addCommand({
 			id: 'import-opml',
-			/* eslint-disable-next-line obsidianmd/ui/sentence-case -- OPML */
 			name: 'Import outlines from OPML',
 			callback: () => {
 				new OpmlImportModal(this.app).open();
