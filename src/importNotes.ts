@@ -1,6 +1,7 @@
 import {normalizePath, TFolder, type App} from 'obsidian';
 import {buildNoteContentFromTemplate} from './buildNoteContent';
 import {generateFilenameFromOutline} from './opmlOutlines';
+import {createPlaceholderContext, type PlaceholderContext} from './opmlPlaceholders';
 import type {OpmlOutline} from './opmlTypes';
 
 /** Normalized vault folder path; `''` is the vault root. */
@@ -13,6 +14,22 @@ export function normalizeFolderPath(input: string): string {
 
 export function joinVaultPath(folderPath: string, name: string): string {
 	return folderPath === '' ? normalizePath(name) : normalizePath(`${folderPath}/${name}`);
+}
+
+/**
+ * Rewrite each segment of `folderPath` to the casing of an existing vault item, so `Podcasts`
+ * resolves to an existing `podcasts` folder. macOS and Windows treat the two as the same folder,
+ * and creating the second one fails with "Folder already exists".
+ */
+export function matchExistingCase(app: App, folderPath: string): string {
+	if (folderPath === '') return '';
+	const existing = new Map(app.vault.getAllLoadedFiles().map((f) => [f.path.toLowerCase(), f.path]));
+	let resolved = '';
+	for (const segment of folderPath.split('/')) {
+		const candidate = resolved === '' ? segment : `${resolved}/${segment}`;
+		resolved = existing.get(candidate.toLowerCase()) ?? candidate;
+	}
+	return resolved;
 }
 
 export type FolderStatus = 'exists' | 'missing' | 'not-a-folder';
@@ -89,6 +106,7 @@ export async function createNotesFromOutlines(
 	outlines: OpmlOutline[],
 	templateContent: string,
 	folderPath: string,
+	context: PlaceholderContext = createPlaceholderContext(),
 ): Promise<ImportResult> {
 	const result: ImportResult = {created: [], failed: []};
 	const paths = createPathTracker(app);
@@ -96,7 +114,7 @@ export async function createNotesFromOutlines(
 	for (const outline of outlines) {
 		const name = generateFilenameFromOutline(outline);
 		try {
-			const content = buildNoteContentFromTemplate(templateContent, outline);
+			const content = buildNoteContentFromTemplate(templateContent, outline, context);
 			const path = findAvailableNotePath(folderPath, name, paths.isTaken);
 			await app.vault.create(path, content);
 			paths.add(path);

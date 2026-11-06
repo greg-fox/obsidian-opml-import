@@ -6,6 +6,20 @@
  */
 import {vi} from 'vitest';
 
+/** Fixed instant returned by the stub `moment()`: 2026-01-02 03:04:05. */
+export const STUB_NOW = {YYYY: '2026', MM: '01', DD: '02', HH: '03', mm: '04', ss: '05'} as const;
+
+/**
+ * Minimal stand-in for Obsidian's bundled moment: always returns {@link STUB_NOW} and supports
+ * the YYYY, MM, DD, HH, mm, and ss tokens, so date placeholders are deterministic in tests.
+ */
+export function moment() {
+	return {
+		format: (format = 'YYYY-MM-DDTHH:mm:ss') =>
+			format.replace(/YYYY|MM|DD|HH|mm|ss/g, (token) => STUB_NOW[token as keyof typeof STUB_NOW]),
+	};
+}
+
 export const mockPluginLoadData = vi.fn().mockResolvedValue({});
 export const mockPluginSaveData = vi.fn().mockResolvedValue(undefined);
 export const mockPluginAddCommand = vi.fn();

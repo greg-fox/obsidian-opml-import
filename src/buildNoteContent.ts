@@ -1,4 +1,4 @@
-import { applyOpmlPlaceholders } from './opmlPlaceholders';
+import { applyOpmlPlaceholders, createPlaceholderContext, type PlaceholderContext } from './opmlPlaceholders';
 import { splitFrontmatter } from './splitFrontmatter';
 import type { OpmlOutline } from './opmlTypes';
 
@@ -6,10 +6,14 @@ import type { OpmlOutline } from './opmlTypes';
  * Render vault template + outline into final Markdown (frontmatter + body).
  * Used by import; pure function for testing.
  */
-export function buildNoteContentFromTemplate(templateContent: string, outline: OpmlOutline): string {
+export function buildNoteContentFromTemplate(
+	templateContent: string,
+	outline: OpmlOutline,
+	context: PlaceholderContext = createPlaceholderContext(),
+): string {
 	const {frontmatter: fmRaw, body: bodyRaw} = splitFrontmatter(templateContent);
-	const frontmatter = applyOpmlPlaceholders(fmRaw, outline, true);
-	const body = applyOpmlPlaceholders(bodyRaw, outline, false);
+	const frontmatter = applyOpmlPlaceholders(fmRaw, outline, true, context);
+	const body = applyOpmlPlaceholders(bodyRaw, outline, false, context);
 
 	if (frontmatter.trim()) {
 		let fm = frontmatter.trim();

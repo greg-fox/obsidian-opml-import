@@ -1,6 +1,6 @@
 import type {App} from 'obsidian';
 import {afterEach, beforeEach, describe, expect, it, vi} from 'vitest';
-import {OpmlImportModal} from './importModal';
+import {OpmlImportModal, TEMPLATER_WARNING} from './importModal';
 import {createFakeVault, PODCAST_OPML, type FakeVaultOptions} from './test/fakeVault';
 import {notices} from './test/obsidian-stub';
 
@@ -18,6 +18,7 @@ async function setup(options: FakeVaultOptions = {}) {
 		},
 		folders: options.folders,
 		templatesFolder: options.templatesFolder,
+		config: options.config,
 	});
 	const modal = new OpmlImportModal(vault.app as unknown as App);
 	modal.open();
@@ -40,6 +41,7 @@ async function setup(options: FakeVaultOptions = {}) {
 	const select = () => settingByName('Template').querySelector('select') as HTMLSelectElement;
 	const errorEl = () => el.querySelector('.opml-import-error') as HTMLElement;
 	const previewEl = () => el.querySelector('.opml-import-preview') as HTMLElement;
+	const warningEl = () => el.querySelector('.opml-import-warning') as HTMLElement;
 	const isShown = (e: HTMLElement) => e.style.display !== 'none';
 
 	const change = (target: HTMLInputElement | HTMLSelectElement, value: string) => {
@@ -53,7 +55,7 @@ async function setup(options: FakeVaultOptions = {}) {
 		change(input('Destination folder'), folder);
 	};
 
-	return {vault, modal, el, button, input, select, errorEl, previewEl, isShown, change, fillForm};
+	return {vault, modal, el, button, input, select, errorEl, previewEl, warningEl, isShown, change, fillForm};
 }
 
 describe('OpmlImportModal', () => {
@@ -242,7 +244,70 @@ describe('OpmlImportModal', () => {
 		});
 	});
 
+	describe('Templater warning', () => {
+		it('warns when the selected template contains Templater commands', async () => {
+			const {modal, warningEl, isShown, button, fillForm} = await setup({
+				files: {'Templates/Templater.md': '# {{title}}\n<% tp.date.now() %>'},
+			});
+			await fillForm(undefined, 'Templates/Templater.md');
+			await vi.waitFor(() => expect(isShown(warningEl())).toBe(true));
+			expect(warningEl().textContent).toBe(TEMPLATER_WARNING);
+			expect(button('Import').disabled).toBe(false);
+			expect(modal.templateFile?.path).toBe('Templates/Templater.md');
+		});
+
+		it('does not warn for a template without Templater commands', async () => {
+			const {modal, warningEl, isShown} = await setup();
+			await modal.selectTemplate('Templates/Podcast.md');
+			expect(isShown(warningEl())).toBe(false);
+		});
+
+		it('clears the warning when another template is selected', async () => {
+			const {modal, warningEl, isShown} = await setup({files: {'Templates/Templater.md': '<% x %>'}});
+			await modal.selectTemplate('Templates/Templater.md');
+			expect(isShown(warningEl())).toBe(true);
+			await modal.selectTemplate('Templates/Podcast.md');
+			expect(isShown(warningEl())).toBe(false);
+		});
+
+		it('ignores a slow read for a template that is no longer selected', async () => {
+			const {modal, vault, warningEl, isShown} = await setup({files: {'Templates/Templater.md': '<% x %>'}});
+			let release: () => void = () => {};
+			const read = vault.app.vault.read;
+			vault.app.vault.read = (file) =>
+				new Promise((resolve) => {
+					release = () => resolve(read(file));
+				});
+			const slow = modal.selectTemplate('Templates/Templater.md');
+			vault.app.vault.read = read;
+			await modal.selectTemplate('Templates/Podcast.md');
+			release();
+			await slow;
+			expect(modal.templateFile?.path).toBe('Templates/Podcast.md');
+			expect(isShown(warningEl())).toBe(false);
+		});
+
+		it('skips the check when the template cannot be read', async () => {
+			const {modal, vault, warningEl, isShown} = await setup();
+			vault.app.vault.read = () => Promise.reject(new Error('locked'));
+			await modal.selectTemplate('Templates/Podcast.md');
+			expect(modal.templateFile?.path).toBe('Templates/Podcast.md');
+			expect(isShown(warningEl())).toBe(false);
+		});
+	});
+
 	describe('import', () => {
+		it('fills date placeholders using the core Templates formats', async () => {
+			const {fillForm, modal, vault} = await setup({
+				files: {'Templates/Dated.md': 'Imported {{date}} at {{time}} ({{date:YYYY}})'},
+				config: {'templates.json': {folder: 'Templates', dateFormat: 'DD.MM.YYYY', timeFormat: 'HH:mm:ss'}},
+			});
+			await fillForm(undefined, 'Templates/Dated.md');
+			await modal.runImport();
+			// The test stub's moment() is fixed at 2026-01-02 03:04:05.
+			expect(vault.files.get('Connected.md')).toBe('Imported 02.01.2026 at 03:04:05 (2026)');
+		});
+
 		it('creates rendered notes, reports success, and closes', async () => {
 			const {fillForm, button, vault, modal} = await setup({folders: ['Podcasts']});
 			await fillForm(undefined, undefined, 'Podcasts');
@@ -314,6 +379,26 @@ describe('OpmlImportModal', () => {
 			await modal.runImport();
 			modal.setDestination('');
 			expect(isShown(errorEl())).toBe(false);
+		});
+
+		it('imports into an existing folder whose name differs only in case', async () => {
+			const {fillForm, modal, vault, previewEl} = await setup({folders: ['podcasts']});
+			await fillForm(undefined, undefined, 'Podcasts');
+			expect(previewEl().textContent).toContain('3 notes will be created in podcasts.');
+			expect(previewEl().textContent).not.toContain('The folder');
+			await modal.runImport();
+			expect(vault.createFolder).not.toHaveBeenCalled();
+			expect(vault.create.mock.calls.map(([p]) => p).every((p) => p.startsWith('podcasts/'))).toBe(true);
+			expect(isOpen(modal)).toBe(false);
+		});
+
+		it('uses the existing folder casing when the folder appears after the destination was entered', async () => {
+			const {fillForm, modal, vault} = await setup();
+			await fillForm(undefined, undefined, 'Podcasts');
+			vault.folders.add('podcasts');
+			await modal.runImport();
+			expect(vault.createFolder).not.toHaveBeenCalled();
+			expect(vault.create.mock.calls.map(([p]) => p).every((p) => p.startsWith('podcasts/'))).toBe(true);
 		});
 
 		it('does nothing when the form is incomplete', async () => {

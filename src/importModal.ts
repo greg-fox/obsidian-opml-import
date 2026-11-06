@@ -6,13 +6,20 @@ import {
 	createNotesFromOutlines,
 	ensureFolder,
 	getFolderStatus,
+	matchExistingCase,
 	normalizeFolderPath,
 	type FolderStatus,
 } from './importNotes';
-import {collectVaultTemplateFiles} from './vaultTemplateSources';
+import {createPlaceholderContext} from './opmlPlaceholders';
+import {collectVaultTemplateFiles, getCoreTemplateFormats} from './vaultTemplateSources';
 
 const OUTLINE_EXTENSIONS = ['opml', 'xml'];
 const PREVIEW_SAMPLE_SIZE = 5;
+/** Templater command tags, which this plugin does not execute. */
+const TEMPLATER_COMMAND = /<%[\s\S]*?%>/;
+
+export const TEMPLATER_WARNING =
+	'This template contains Templater commands (<% %>). They are not run during import and will appear as plain text in the new notes.';
 
 function isOutlineFile(file: unknown): file is TFile {
 	return file instanceof TFile && OUTLINE_EXTENSIONS.includes(file.extension.toLowerCase());
@@ -32,11 +39,13 @@ export class OpmlImportModal extends Modal {
 
 	private outlineError = '';
 	private importError = '';
+	private templateWarning = '';
 	private importing = false;
 
 	private outlineInputEl: HTMLInputElement | null = null;
 	private previewEl: HTMLElement | null = null;
 	private errorEl: HTMLElement | null = null;
+	private warningEl: HTMLElement | null = null;
 	private importButton: ButtonComponent | null = null;
 
 	constructor(app: App) {
@@ -47,7 +56,8 @@ export class OpmlImportModal extends Modal {
 		const {contentEl} = this;
 		contentEl.empty();
 		this.modalEl.addClass('opml-import-modal');
-		this.setTitle('Import outlines');
+		// titleEl rather than setTitle(), which is not available in every supported Obsidian version.
+		this.titleEl.setText('Import outlines');
 
 		const templates = await collectVaultTemplateFiles(this.app);
 		if (templates.length === 0) {
@@ -57,7 +67,6 @@ export class OpmlImportModal extends Modal {
 
 		new Setting(contentEl)
 			.setName('Outline file')
-			// eslint-disable-next-line obsidianmd/ui/sentence-case -- file extensions
 			.setDesc('Path to an .opml or .xml file in the vault.')
 			.addText((text) => {
 				text.setPlaceholder('Folder/export.opml');
@@ -74,7 +83,6 @@ export class OpmlImportModal extends Modal {
 
 		new Setting(contentEl)
 			.setName('Template')
-			// eslint-disable-next-line obsidianmd/ui/sentence-case -- plugin names
 			.setDesc('A note from your Templates or Templater folder.')
 			.addDropdown((dropdown) => {
 				dropdown.addOption('', 'Select a template...');
@@ -87,7 +95,9 @@ export class OpmlImportModal extends Modal {
 					}
 					group.createEl('option', {text: file.basename, value: file.path});
 				}
-				dropdown.onChange((value) => this.selectTemplate(value));
+				dropdown.onChange((value) => {
+					void this.selectTemplate(value);
+				});
 			});
 
 		new Setting(contentEl)
@@ -99,6 +109,7 @@ export class OpmlImportModal extends Modal {
 			});
 
 		this.previewEl = contentEl.createDiv({cls: 'opml-import-preview'});
+		this.warningEl = contentEl.createDiv({cls: 'opml-import-warning'});
 		this.errorEl = contentEl.createDiv({cls: 'opml-import-error'});
 
 		new Setting(contentEl)
@@ -147,15 +158,30 @@ export class OpmlImportModal extends Modal {
 		this.refresh();
 	}
 
-	selectTemplate(path: string): void {
-		const file = path ? this.app.vault.getAbstractFileByPath(path) : null;
-		this.templateFile = file instanceof TFile ? file : null;
+	/** Select a template and warn if it contains Templater commands, which are not run. */
+	async selectTemplate(path: string): Promise<void> {
+		const found = path ? this.app.vault.getAbstractFileByPath(path) : null;
+		const file = found instanceof TFile ? found : null;
+		this.templateFile = file;
+		this.templateWarning = '';
 		this.importError = '';
+		this.refresh();
+		if (!file) return;
+
+		let content: string;
+		try {
+			content = await this.app.vault.read(file);
+		} catch {
+			return; // A read failure is reported when the import reads the template.
+		}
+		// Ignore the result if another template was selected while this one was being read.
+		if (this.templateFile !== file) return;
+		this.templateWarning = TEMPLATER_COMMAND.test(content) ? TEMPLATER_WARNING : '';
 		this.refresh();
 	}
 
 	setDestination(rawPath: string): void {
-		this.folderPath = normalizeFolderPath(rawPath);
+		this.folderPath = matchExistingCase(this.app, normalizeFolderPath(rawPath));
 		this.importError = '';
 		this.refresh();
 	}
@@ -167,7 +193,6 @@ export class OpmlImportModal extends Modal {
 			if (this.outlineInputEl) this.outlineInputEl.value = only.path;
 			await this.selectOutlineFile(only.path);
 		} else if (files.length === 0) {
-			// eslint-disable-next-line obsidianmd/ui/sentence-case -- file extensions
 			new Notice('No .opml or .xml files found in the vault.');
 		} else {
 			new Notice(`Found ${files.length} outline files. Enter the path of the one to import.`);
@@ -203,6 +228,10 @@ export class OpmlImportModal extends Modal {
 		}
 		if (this.previewEl) {
 			this.renderPreview(this.previewEl, folderStatus);
+		}
+		if (this.warningEl) {
+			this.warningEl.setText(this.templateWarning);
+			this.warningEl.toggle(this.templateWarning !== '');
 		}
 		this.importButton?.setDisabled(!this.canImport());
 	}
@@ -243,16 +272,25 @@ export class OpmlImportModal extends Modal {
 	}
 
 	async runImport(): Promise<void> {
-		const {templateFile, outlines, folderPath} = this;
+		const {templateFile, outlines} = this;
 		if (!this.canImport() || !templateFile) return;
 
 		this.importing = true;
 		this.importError = '';
 		this.refresh();
 		try {
+			// The vault may have changed since the destination was entered.
+			const folderPath = matchExistingCase(this.app, this.folderPath);
 			await ensureFolder(this.app, folderPath);
 			const templateContent = await this.app.vault.read(templateFile);
-			const {created, failed} = await createNotesFromOutlines(this.app, outlines, templateContent, folderPath);
+			const context = createPlaceholderContext(await getCoreTemplateFormats(this.app));
+			const {created, failed} = await createNotesFromOutlines(
+				this.app,
+				outlines,
+				templateContent,
+				folderPath,
+				context,
+			);
 
 			const createdText = created.length === 1 ? '1 note' : `${created.length} notes`;
 			new Notice(

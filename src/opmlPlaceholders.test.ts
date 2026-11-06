@@ -3,6 +3,9 @@ import {
 	applyBodyPlaceholders,
 	applyFrontmatterPlaceholders,
 	applyOpmlPlaceholders,
+	createPlaceholderContext,
+	DEFAULT_DATE_FORMAT,
+	DEFAULT_TIME_FORMAT,
 	getPlaceholderValues,
 } from './opmlPlaceholders';
 import type {OpmlOutline} from './opmlTypes';
@@ -47,13 +50,29 @@ describe('applyBodyPlaceholders', () => {
 		);
 	});
 
+	it('allows spaces inside the braces', () => {
+		expect(applyBodyPlaceholders('{{ title }} {{  xmlUrl}} {{type }}', full)).toBe('T http://a rss');
+	});
+
+	it('does not treat a single-brace or misspelled placeholder as one', () => {
+		expect(applyBodyPlaceholders('{ title } {{ xml Url }} {{ titles }}', full)).toBe('{ title } {{ xml Url }} {{ titles }}');
+	});
+
 	it('leaves unknown placeholders alone', () => {
-		expect(applyBodyPlaceholders('{{date}} {{title}}', {title: 'T'})).toBe('{{date}} T');
+		expect(applyBodyPlaceholders('{{author}} {{title:x}} {{title}}', {title: 'T'})).toBe('{{author}} {{title:x}} T');
 	});
 });
 
 describe('applyFrontmatterPlaceholders', () => {
 	const apply = (fm: string, outline: OpmlOutline) => applyFrontmatterPlaceholders(fm, outline);
+
+	it('quotes placeholders written with spaces inside the braces', () => {
+		expect(apply('category: {{ category }}\nurl: {{ xmlUrl }}', full)).toBe('category: "c"\nurl: "http://a"');
+	});
+
+	it('fills quoted placeholders, the form recommended for templates', () => {
+		expect(apply('url: "{{xmlUrl}}"', {xmlUrl: 'https://a/"x"'})).toBe('url: "https://a/\\"x\\""');
+	});
 
 	it('quotes plain values so URLs keep their colons', () => {
 		expect(apply('xmlUrl: {{xmlUrl}}', {xmlUrl: 'https://www.relay.fm/connected/feed'})).toBe(
@@ -127,5 +146,47 @@ describe('applyOpmlPlaceholders', () => {
 		const outline = {title: 'a: b'};
 		expect(applyOpmlPlaceholders('t: {{title}}', outline, true)).toBe('t: "a: b"');
 		expect(applyOpmlPlaceholders('t: {{title}}', outline, false)).toBe('t: a: b');
+	});
+});
+
+describe('date and time placeholders', () => {
+	// The test stub's moment() is fixed at 2026-01-02 03:04:05.
+	const outline = {title: 'T'};
+
+	it('uses the core Templates defaults', () => {
+		expect(DEFAULT_DATE_FORMAT).toBe('YYYY-MM-DD');
+		expect(DEFAULT_TIME_FORMAT).toBe('HH:mm');
+		expect(applyBodyPlaceholders('{{date}} {{time}}', outline)).toBe('2026-01-02 03:04');
+	});
+
+	it('uses the configured formats', () => {
+		const context = createPlaceholderContext({dateFormat: 'DD/MM/YYYY', timeFormat: 'HH:mm:ss'});
+		expect(applyBodyPlaceholders('{{date}} {{time}}', outline, context)).toBe('02/01/2026 03:04:05');
+	});
+
+	it('falls back to the defaults for empty configured formats', () => {
+		const context = createPlaceholderContext({dateFormat: '', timeFormat: ''});
+		expect(applyBodyPlaceholders('{{date}} {{time}}', outline, context)).toBe('2026-01-02 03:04');
+	});
+
+	it('accepts an inline format', () => {
+		expect(applyBodyPlaceholders('{{date:YYYY}} {{time: HH }} {{date:}}', outline)).toBe('2026 03 2026-01-02');
+	});
+
+	it('allows spaces around the name and the format', () => {
+		expect(applyBodyPlaceholders('{{ date }} {{ time }} {{ date : YYYY }} {{date: MM }}', outline)).toBe(
+			'2026-01-02 03:04 2026 01',
+		);
+	});
+
+	it('quotes dates in frontmatter like any other value', () => {
+		expect(applyFrontmatterPlaceholders('created: {{date}}T{{time}}', outline)).toBe('created: "2026-01-02T03:04"');
+	});
+
+	it('uses the same instant for every placeholder in an import', () => {
+		const context = createPlaceholderContext();
+		const first = applyBodyPlaceholders('{{date}}', {title: 'a'}, context);
+		const second = applyBodyPlaceholders('{{date}}', {title: 'b'}, context);
+		expect(first).toBe(second);
 	});
 });

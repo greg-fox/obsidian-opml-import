@@ -2,6 +2,7 @@ import type {App} from 'obsidian';
 import {describe, expect, it} from 'vitest';
 import {
 	collectVaultTemplateFiles,
+	getCoreTemplateFormats,
 	getTemplateFolderSources,
 	listMarkdownTemplatesInFolder,
 } from './vaultTemplateSources';
@@ -110,6 +111,19 @@ describe('listMarkdownTemplatesInFolder', () => {
 	it('returns nothing when the folder is missing or is a file', () => {
 		expect(listMarkdownTemplatesInFolder(app, 'nope')).toEqual([]);
 		expect(listMarkdownTemplatesInFolder(app, 'root.md')).toEqual([]);
+	});
+});
+
+describe('getCoreTemplateFormats', () => {
+	it('reads the configured date and time formats', async () => {
+		const app = appWith({config: {'templates.json': {folder: 'T', dateFormat: 'DD/MM/YYYY', timeFormat: 'h:mm A'}}});
+		expect(await getCoreTemplateFormats(app)).toEqual({dateFormat: 'DD/MM/YYYY', timeFormat: 'h:mm A'});
+	});
+
+	it('falls back to the core Templates defaults', async () => {
+		expect(await getCoreTemplateFormats(appWith({}))).toEqual({dateFormat: 'YYYY-MM-DD', timeFormat: 'HH:mm'});
+		const blank = appWith({config: {'templates.json': {dateFormat: '', timeFormat: 7}}});
+		expect(await getCoreTemplateFormats(blank)).toEqual({dateFormat: 'YYYY-MM-DD', timeFormat: 'HH:mm'});
 	});
 });
 

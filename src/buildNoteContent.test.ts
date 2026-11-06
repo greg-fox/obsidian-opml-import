@@ -1,5 +1,6 @@
 import {describe, expect, it} from 'vitest';
 import {buildNoteContentFromTemplate} from './buildNoteContent';
+import {createPlaceholderContext} from './opmlPlaceholders';
 
 describe('buildNoteContentFromTemplate', () => {
 	it('renders body only when there is no frontmatter', () => {
@@ -16,6 +17,11 @@ describe('buildNoteContentFromTemplate', () => {
 
 	it('keeps the spacing between frontmatter and body from the template', () => {
 		expect(buildNoteContentFromTemplate('---\na: {{title}}\n---\nBody', {title: 'T'})).toBe('---\na: "T"\n---\nBody');
+	});
+
+	it('applies the placeholder context to frontmatter and body', () => {
+		const context = createPlaceholderContext({dateFormat: 'YYYY'});
+		expect(buildNoteContentFromTemplate('---\nd: {{date}}\n---\n{{date}}', {}, context)).toBe('---\nd: "2026"\n---\n2026');
 	});
 
 	it('drops an empty frontmatter block', () => {
